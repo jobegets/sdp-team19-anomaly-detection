@@ -1,0 +1,5 @@
+# data from hugging face
+test-data/
+
+# virtual environment stuff
+.venv/
