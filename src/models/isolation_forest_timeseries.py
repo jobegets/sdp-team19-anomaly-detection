@@ -43,33 +43,64 @@ def load_driving_data(csv_path: Path) -> pd.DataFrame:
     
     return driving_df
 
-# Trains and runs isolation forest
-# TODO figure out how to best tune hyperparameters
+# Trains and runs isolation forest using a sliding time window over features
 def run_isolation_forest(
     driving_df: pd.DataFrame,
     contamination: float = 0.01,
     threshold_quantile: float = 0.80,
     random_state: int = 42,
+    window_size: int = 25,
 ) -> tuple[pd.DataFrame, float]:
     
-    # Normalize features, paper uses MinMax scaler:
-    # Can reduce the network calculation load and improves the training speed
+    if "Time" not in driving_df.columns:
+        raise KeyError("Expected column 'Time' not found in driving data.")
+
+    if "BMS Disch Enable" not in driving_df.columns:
+        raise KeyError("Expected column 'BMS Disch Enable' not found in driving data.")
+
+    # Binary label per timestep: 1 if BMS discharge disabled (fault), 0 otherwise
+    labels_t = (driving_df["BMS Disch Enable"] == 0).astype(int)
+
+    # Feature columns for the window (exclude Time and label)
+    feature_cols = [
+        col
+        for col in driving_df.select_dtypes(include=["number"]).columns
+        if col not in ("Time", "BMS Disch Enable")
+    ]
+
+    if not feature_cols:
+        raise ValueError("No numeric feature columns found for sliding window.")
+
+    values = driving_df[feature_cols].values
+    times = driving_df["Time"].values
+
+    if len(values) <= window_size:
+        raise ValueError(
+            f"Not enough samples ({len(values)}) for window size {window_size}."
+        )
+
+    # Build sliding windows: each row is the flattened last `window_size` samples
+    num_windows = len(values) - window_size + 1
+    num_features = len(feature_cols) * window_size
+
+    X_seq = np.zeros((num_windows, num_features), dtype=float)
+    for i in range(num_windows):
+        window = values[i : i + window_size]
+        X_seq[i] = window.flatten()
+
+    # Align labels and times to the end of each window
+    labels_seq = labels_t.values[window_size - 1 :]
+    times_seq = times[window_size - 1 :]
+
+    # Normal windows: end point is non-fault
+    normal_mask = labels_seq == 0
+
+    X_normal = X_seq[normal_mask]
+    X_full = X_seq
+
     scaler = MinMaxScaler()
-    X_all = scaler.fit_transform(driving_df.values)
-
-    labels = pd.DataFrame(index=driving_df.index)
-
-    # Mark faults
-    if "BMS Disch Enable" in driving_df.columns:
-        labels["BMS_Disch_Disabled"] = (driving_df["BMS Disch Enable"] == 0).astype(int)
-    else:
-        labels["BMS_Disch_Disabled"] = 0
-
-    labels["any_bms_fault"] = labels["BMS_Disch_Disabled"]
-    normal_mask = labels["any_bms_fault"] == 0 
-
-    X_normal = X_all[normal_mask.values] # Normal, fault-free data
-    X_full = X_all # All data
+    X_normal_scaled = scaler.fit_transform(X_normal)
+    X_full_scaled = scaler.transform(X_full)
 
     iso = IsolationForest(
         n_estimators=200,
@@ -79,18 +110,17 @@ def run_isolation_forest(
         n_jobs=-1,
     )
 
-    iso.fit(X_normal) # Train model
-    
-    # The normality score for every point
-    # Initially: higher = more normal, lower = more anomalous
-    decision_vals = iso.decision_function(X_full) 
-    
-    # By standard practice, flip the meanings
+    iso.fit(X_normal_scaled)
+
+    # The normality score for every window
+    decision_vals = iso.decision_function(X_full_scaled)
     anomaly_scores = -decision_vals
 
-    result_df = driving_df.copy()
+    # Result dataframe at window-level (aligned with window ends)
+    result_df = driving_df.iloc[window_size - 1 :].copy()
+    result_df["Time"] = times_seq
     result_df["anomaly_score"] = anomaly_scores
-    result_df["any_bms_fault"] = labels["any_bms_fault"].values
+    result_df["any_bms_fault"] = labels_seq
 
     # Flag anomalies based on given threshold quantile
     threshold = float(np.quantile(anomaly_scores, threshold_quantile))
@@ -113,8 +143,6 @@ def plot_results(driving_df: pd.DataFrame, threshold: float) -> None:
     plt.axhline(threshold, color="red", linestyle="--", label="Threshold")
     plt.ylabel("Score")
     plt.legend(loc="upper right")
-
-    ax2 = plt.subplot(3, 1, 2, sharex=ax1)
     plt.plot(
         t,
         driving_df["anomalous_flag"].iloc[start_idx:end_idx],

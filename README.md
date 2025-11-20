@@ -7,8 +7,10 @@
 ```bash
 # 1. Install uv package manager
 curl -LsSf https://astral.sh/uv/install.sh | sh
-# 2. Start virtual environment
-uv env
+# 2. Start virtual environment (optional if already created)
+uv venv
+# 3. Activate virtual environment
+source .venv/bin/activate
 # 3. Install dependencies
 uv pip install -r requirements.txt
 ```
