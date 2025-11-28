@@ -1,61 +1,56 @@
-import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.ensemble import IsolationForest
-import matplotlib.pyplot as plt
-import numpy as np
+import sys
 from pathlib import Path
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
+import joblib
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import MinMaxScaler
+
+if __package__ is None or __package__ == "":
+    # Allow running as a script from repo root: python src/models/isolation_forest.py
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+
+from src.utils import (
+    load_driving_data,
+    plot_features_over_time,
+    plot_results,
+    print_evaluation,
+)
 
 repo_root = Path(__file__).resolve().parents[2]
 CSV_PATH = (repo_root / "test-data" / "7-12-2025" / "fsae-7-12 (8).csv").expanduser().resolve()
-
-
-# Loads and cleans driving data
-def load_driving_data(csv_path: Path) -> pd.DataFrame:
-    if not csv_path.exists():
-        raise FileNotFoundError(f"CSV file not found at {csv_path}")
-
-    columns = [
-        "Time",
-        "BMS Disch Enable",
-        # Battery
-        "Pack Voltage","Pack Current","Pack Temp","State of Charge","Min Cell Voltage","BMS LV input",
-        # Powertrain / inverter / motor
-        "Torque Feedback",
-        "RPM",
-        "Flux Feedback",
-        # Dynamics
-        "InlineAcc","LateralAcc","VerticalAcc",
-        "BrakeBias",
-        "RollRate","PitchRate","YawRate",
-    ]
-    
-    
-    df = pd.read_csv(csv_path, skiprows=[1], usecols=columns)
-    df.columns = df.columns.str.strip().str.replace('"', "")
-    print(df.columns)
-    df = df.dropna(subset=["Time"]).sort_values("Time")
-
-    # Only want data where car is moving
-    driving_df = df[df["RPM"] > 0.5].copy()
-    
-    return driving_df
+ARTIFACT_PATH = (repo_root / "artifacts" / "isolation_forest.pkl").expanduser().resolve()
 
 # Trains and runs isolation forest
-# TODO figure out how to best tune hyperparameters
+# TODO figure out how to best tune hyperparameters. Also tuning threshold quantile.
 def run_isolation_forest(
     driving_df: pd.DataFrame,
     contamination: float = 0.01,
     threshold_quantile: float = 0.80,
     random_state: int = 42,
-) -> tuple[pd.DataFrame, float]:
-    
+) -> tuple[pd.DataFrame, float, MinMaxScaler, IsolationForest, list[str]]:
+    """Train IsolationForest on normal data and score all points.
+
+    Args:
+        driving_df: Preprocessed driving data.
+        contamination: Expected proportion of anomalies for the IF model.
+        threshold_quantile: Quantile of anomaly scores used to set the alert threshold.
+        random_state: Seed for reproducibility.
+
+    Returns:
+        result_df: Copy of input with new anomaly_score, any_bms_fault, anomalous_flag.
+        threshold: Score cutoff derived from threshold_quantile.
+        scaler: Fitted MinMaxScaler.
+        iso: Fitted IsolationForest model.
+        feature_cols: List of original feature column names used for training.
+    """
+    feature_cols = driving_df.columns.tolist()
+
     # Normalize features, paper uses MinMax scaler:
     # Can reduce the network calculation load and improves the training speed
     scaler = MinMaxScaler()
-    X_all = scaler.fit_transform(driving_df.values)
+    X_all = scaler.fit_transform(driving_df[feature_cols].values)
 
     labels = pd.DataFrame(index=driving_df.index)
 
@@ -96,150 +91,27 @@ def run_isolation_forest(
     threshold = float(np.quantile(anomaly_scores, threshold_quantile))
     result_df["anomalous_flag"] = (result_df["anomaly_score"] >= threshold).astype(int)
 
-    return result_df, threshold
-
-
-def plot_results(driving_df: pd.DataFrame, threshold: float) -> None:
-    N = len(driving_df)
-    start_idx = 0
-    end_idx = min(5000, N)
-
-    t = driving_df["Time"].iloc[start_idx:end_idx].values
-
-    plt.figure(figsize=(14, 8))
-
-    ax1 = plt.subplot(3, 1, 1)
-    plt.plot(t, driving_df["anomaly_score"].iloc[start_idx:end_idx], label="Anomaly score")
-    plt.axhline(threshold, color="red", linestyle="--", label="Threshold")
-    plt.ylabel("Score")
-    plt.legend(loc="upper right")
-
-    ax2 = plt.subplot(3, 1, 2, sharex=ax1)
-    plt.plot(
-        t,
-        driving_df["anomalous_flag"].iloc[start_idx:end_idx],
-        label="Anomalous flag",
-    )
-    plt.plot(
-        t,
-        driving_df["any_bms_fault"].iloc[start_idx:end_idx],
-        label="BMS fault flag",
-    )
-    plt.ylabel("Flags")
-    plt.legend(loc="upper right")
-
-    ax3 = plt.subplot(3, 1, 3, sharex=ax1)
-    if "Pack Voltage" in driving_df.columns:
-        plt.plot(
-            t,
-            driving_df["Pack Voltage"].iloc[start_idx:end_idx],
-            label="Pack Voltage",
-        )
-    if "Pack Current" in driving_df.columns:
-        plt.plot(
-            t,
-            driving_df["Pack Current"].iloc[start_idx:end_idx],
-            label="Pack Current",
-        )
-    plt.legend(loc="upper right")
-    plt.xlabel("Time")
-    plt.ylabel("Pack signals")
-
-    plt.tight_layout()
-    plt.show()
-
-# Plots all features in df over time
-def plot_features_over_time_plotly(df: pd.DataFrame) -> None:
-
-    if "Time" not in df.columns:
-        raise KeyError("Expected column 'Time' not found in DataFrame.")
-
-    time_values = df["Time"].values
-    feature_cols = [
-        col
-        for col in df.select_dtypes(include=["number"]).columns
-        if col != "Time"
-    ]
-
-    if not feature_cols:
-        return
-
-    feature_cols.sort()
-    n_features = len(feature_cols)
-
-    if n_features == 1:
-        fig = go.Figure()
-        col = feature_cols[0]
-        fig.add_trace(go.Scatter(x=time_values, y=df[col].values, name=col, mode="lines"))
-        fig.update_layout(
-            title=f"{col} over Time",
-            xaxis_title="Time",
-            yaxis_title="Value",
-        )
-        fig.show()
-        return
-
-    max_spacing = 1.0 / (n_features - 0.5)
-    vertical_spacing = min(0.01, max_spacing - 1e-4) if n_features > 1 else 0.01
-
-    fig = make_subplots(
-        rows=n_features,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=vertical_spacing,
-        subplot_titles=feature_cols,
-    )
-
-    for i, col in enumerate(feature_cols, start=1):
-        fig.add_trace(
-            go.Scatter(x=time_values, y=df[col].values, name=col, mode="lines"),
-            row=i,
-            col=1,
-        )
-
-    fig.update_xaxes(title_text="Time", row=n_features, col=1)
-    fig.update_layout(
-        # Slightly taller per subplot so titles remain readable,
-        # but still capped to keep everything roughly in one view.
-        height=min(150 * n_features, 1200),
-        showlegend=False,
-        title="Features over Time",
-        margin=dict(l=60, r=20, t=80, b=40),
-    )
-
-    fig.show()
-
-# Prints evaluation of our model
-def print_evaluation(driving_df: pd.DataFrame) -> None:
-    y_true = driving_df["any_bms_fault"].values
-    y_pred = driving_df["anomalous_flag"].values
-
-    total_fault = (y_true == 1).sum()
-    total_normal = (y_true == 0).sum()
-
-    fault_detected = ((y_true == 1) & (y_pred == 1)).sum()
-    normal_flagged = ((y_true == 0) & (y_pred == 1)).sum()
-
-    print("Total BMS-fault points:", total_fault)
-    print("Fault points flagged anomalous:", fault_detected)
-    print(
-        "Coverage of faults: {:.2%}".format(
-            fault_detected / total_fault if total_fault > 0 else 0
-        )
-    )
-
-    print("\nTotal normal points:", total_normal)
-    print("Normal points flagged anomalous:", normal_flagged)
-    print(
-        "False positive rate on normal: {:.2%}".format(
-            normal_flagged / total_normal if total_normal > 0 else 0
-        )
-    )
+    return result_df, threshold, scaler, iso, feature_cols
 
 
 if __name__ == "__main__":
     driving_df = load_driving_data(CSV_PATH)
-    plot_features_over_time_plotly(driving_df)
-    driving_df, threshold = run_isolation_forest(driving_df)
+    plot_features_over_time(driving_df)
+    driving_df, threshold, scaler, iso, feature_cols = run_isolation_forest(driving_df)
+
+    # Save model artifact for deployment
+    ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(
+        {
+            "model": iso,
+            "scaler": scaler,
+            "feature_cols": feature_cols,
+            "threshold": threshold,
+            "threshold_quantile": 0.80,
+        },
+        ARTIFACT_PATH,
+    )
+    print(f"Saved model artifact to {ARTIFACT_PATH}")
+
     plot_results(driving_df, threshold)
-    print_evaluation(driving_df)
+    print_evaluation(driving_df, lookback_seconds=15.0)

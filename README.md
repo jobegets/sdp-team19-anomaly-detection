@@ -27,3 +27,10 @@ hf auth login # should be prompted to enter your PAT
 # 3. Download dataset
 hf download jobegets/ev-fsae-testing --repo-type dataset --local-dir ./test-data
 ```
+
+### Debugging
+
+After activating venv and attempting to install packages with pip:
+`No module named 'pip'`
+
+Try `python -m ensurepip --default-pip`
