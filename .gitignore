@@ -3,3 +3,9 @@ test-data/
 
 # virtual environment stuff
 .venv/
+
+# pycache
+**/__pycache__/
+
+# vscode 
+.vscode/
