@@ -22,11 +22,25 @@ To generate a Personal Access Token (PAT), create a new token with write permiss
 ```bash
 # 1. Ensure hugging face CLI is installed
 hf
+# 1.1 If not:
+curl -LsSf https://hf.co/cli/install.sh | bash
 # 2. Login to hugging face
 hf auth login # should be prompted to enter your PAT
 # 3. Download dataset
 hf download jobegets/ev-fsae-testing --repo-type dataset --local-dir ./test-data
 ```
+
+### Deployment
+
+https://gweb-coral-full.uc.r.appspot.com/docs/dev-board/get-started/#connect-via-mdt
+
+1. Ensure connection to board via `mdt devices`
+2. Open shell on board `mdt shell`
+3. Clone this repo: `git clone https://github.com/jobegets/sdp-team19-anomaly-detection.git`
+4. ^ Follow steps above. Setup venv and huggingface.
+   4.1. Might need to install newer python version. You can do this easily with uv (while in venv)! `uv python install 3.13`
+5. Run model/simulation: `uv run src/deploy/coral_inference.py`
+6. pray
 
 ### Debugging
 
