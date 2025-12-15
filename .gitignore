@@ -9,3 +9,6 @@ test-data/
 
 # vscode 
 .vscode/
+
+# model artifact
+/artifacts

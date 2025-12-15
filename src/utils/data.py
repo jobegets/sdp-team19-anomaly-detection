@@ -3,7 +3,17 @@ import pandas as pd
 
 
 def load_driving_data(csv_path: Path) -> pd.DataFrame:
-    """Load driving CSV, clean column names, drop empty Time rows, and keep moving samples."""
+    """Load and clean a driving CSV to a filtered DataFrame.
+
+    Args:
+        csv_path: Path to the raw sensor CSV.
+
+    Returns:
+        DataFrame with cleaned column names, sorted by time, and limited to samples where car is driving (RPM >0.5).
+
+    Raises:
+        FileNotFoundError: If the CSV path does not exist.
+    """
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV file not found at {csv_path}")
 

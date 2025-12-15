@@ -44,27 +44,35 @@ def run_isolation_forest(
         scaler: Fitted MinMaxScaler.
         iso: Fitted IsolationForest model.
         feature_cols: List of original feature column names used for training.
+
+    Raises:
+        KeyError: If required columns (Time, BMS Disch Enable) are missing.
+        ValueError: If no usable numeric features or no normal samples are available.
     """
-    feature_cols = driving_df.columns.tolist()
+    required_cols = ["Time", "BMS Disch Enable"]
+    for col in required_cols:
+        if col not in driving_df.columns:
+            raise KeyError(f"Expected column '{col}' not found in driving data.")
 
-    # Normalize features, paper uses MinMax scaler:
-    # Can reduce the network calculation load and improves the training speed
+    feature_cols = [
+        col
+        for col in driving_df.select_dtypes(include=["number"]).columns
+        if col not in ("Time", "BMS Disch Enable")
+    ]
+    if not feature_cols:
+        raise ValueError("No numeric feature columns found for model training.")
+
+    fault_flags = (driving_df["BMS Disch Enable"] == 0).astype(int)
+    normal_mask = fault_flags == 0
+    if not normal_mask.any():
+        raise ValueError("No normal samples found (all BMS discharge disabled).")
+
+    # Normalize features on fault-free data and score across all points
     scaler = MinMaxScaler()
-    X_all = scaler.fit_transform(driving_df[feature_cols].values)
-
-    labels = pd.DataFrame(index=driving_df.index)
-
-    # Mark faults
-    if "BMS Disch Enable" in driving_df.columns:
-        labels["BMS_Disch_Disabled"] = (driving_df["BMS Disch Enable"] == 0).astype(int)
-    else:
-        labels["BMS_Disch_Disabled"] = 0
-
-    labels["any_bms_fault"] = labels["BMS_Disch_Disabled"]
-    normal_mask = labels["any_bms_fault"] == 0 
-
-    X_normal = X_all[normal_mask.values] # Normal, fault-free data
-    X_full = X_all # All data
+    X_full = driving_df[feature_cols].values
+    X_normal = X_full[normal_mask.values]
+    X_normal_scaled = scaler.fit_transform(X_normal)
+    X_full_scaled = scaler.transform(X_full)
 
     iso = IsolationForest(
         n_estimators=200,
@@ -74,18 +82,18 @@ def run_isolation_forest(
         n_jobs=-1,
     )
 
-    iso.fit(X_normal) # Train model
+    iso.fit(X_normal_scaled) # Train model
     
     # The normality score for every point
     # Initially: higher = more normal, lower = more anomalous
-    decision_vals = iso.decision_function(X_full) 
+    decision_vals = iso.decision_function(X_full_scaled) 
     
     # By standard practice, flip the meanings
     anomaly_scores = -decision_vals
 
     result_df = driving_df.copy()
     result_df["anomaly_score"] = anomaly_scores
-    result_df["any_bms_fault"] = labels["any_bms_fault"].values
+    result_df["any_bms_fault"] = fault_flags.values
 
     # Flag anomalies based on given threshold quantile
     threshold = float(np.quantile(anomaly_scores, threshold_quantile))

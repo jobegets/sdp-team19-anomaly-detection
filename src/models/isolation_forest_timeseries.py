@@ -39,7 +39,12 @@ def run_isolation_forest(
         random_state: Seed for reproducibility.
 
     Returns:
-        tuple (result_df, threshold): Result_df Window-aligned DataFrame with anomaly_score, any_bms_fault, anomalous_flag. Threshold: Score cutoff derived from threshold_quantile.
+        result_df: Window-aligned copy with new anomaly_score, any_bms_fault, anomalous_flag.
+        threshold: Score cutoff derived from threshold_quantile.
+
+    Raises:
+        KeyError: If required columns (Time, BMS Disch Enable) are missing.
+        ValueError: If no numeric features, no normal windows, or too few samples for the window_size.
     """
     
     if "Time" not in driving_df.columns:
@@ -49,7 +54,7 @@ def run_isolation_forest(
         raise KeyError("Expected column 'BMS Disch Enable' not found in driving data.")
 
     # Binary label per timestep: 1 if BMS discharge disabled (fault), 0 otherwise
-    labels_t = (driving_df["BMS Disch Enable"] == 0).astype(int)
+    fault_flags = (driving_df["BMS Disch Enable"] == 0).astype(int)
 
     # Feature columns for the window (exclude Time and label)
     feature_cols = [
@@ -74,11 +79,13 @@ def run_isolation_forest(
         .iloc[window_size - 1 :]
     )
 
-    labels_seq = labels_t.values[window_size - 1 :]
+    fault_flags_seq = fault_flags.values[window_size - 1 :]
     times_seq = driving_df["Time"].values[window_size - 1 :]
 
     # Normal windows: end point is non-fault
-    normal_mask = labels_seq == 0
+    normal_mask = fault_flags_seq == 0
+    if not normal_mask.any():
+        raise ValueError("No normal windows found (all BMS discharge disabled).")
 
     X_full = rolling_means.values
     X_normal = X_full[normal_mask]
@@ -105,7 +112,7 @@ def run_isolation_forest(
     result_df = driving_df.iloc[window_size - 1 :].copy()
     result_df["Time"] = times_seq
     result_df["anomaly_score"] = anomaly_scores
-    result_df["any_bms_fault"] = labels_seq
+    result_df["any_bms_fault"] = fault_flags_seq
 
     # Flag anomalies based on given threshold quantile
     threshold = float(np.quantile(anomaly_scores, threshold_quantile))

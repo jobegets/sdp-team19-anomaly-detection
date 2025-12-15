@@ -13,7 +13,18 @@ DEFAULT_CSV = repo_root / "test-data" / "7-12-2025" / "fsae-7-12 (8).csv"
 DEFAULT_ARTIFACT = repo_root / "artifacts" / "isolation_forest.pkl"
 
 def stream_scores(csv_path: Path, artifact_path: Path) -> None:
-    """Simulate streaming sensor data and print anomaly scores using a pre-trained model."""
+    """Simulate streaming sensor data and print anomaly scores using a pre-trained model.
+
+    Args:
+        csv_path: Path to the CSV containing sensor readings.
+        artifact_path: Path to a joblib artifact with model, scaler, feature_cols, and threshold.
+
+    Raises:
+        FileNotFoundError: If the artifact path does not exist.
+        
+    Returns:
+        None. Streams scores and logs inference results.
+    """
     if not artifact_path.exists():
         raise FileNotFoundError(f"Artifact not found: {artifact_path}")
 

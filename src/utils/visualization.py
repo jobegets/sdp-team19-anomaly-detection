@@ -10,9 +10,17 @@ def plot_results(
     window_seconds: float = 1.0,
     feature_cols: list[str] | None = None,
 ) -> None:
-    """
-    Plot anomaly scores, flags, and key pack signals; mark model-only anomalies and
-    open a detailed window view around the first model-only anomaly.
+    """Visualize anomaly scores, flags, and key pack signals.
+
+    Produces a multi-row Plotly figure with anomaly scores (and threshold), predicted flags,
+    and selected pack signals. If model-only anomalies exist (flagged but no BMS fault),
+    the first one is expanded via `plot_new_anomaly_windows`.
+
+    Args:
+        driving_df: Dataframe containing time-series data with anomaly_score, anomalous_flag, any_bms_fault.
+        threshold: Anomaly score cutoff used for flagging.
+        window_seconds: Time span window to show around the first model-only anomaly.
+        feature_cols: Optional explicit list of numeric feature columns for window plots; defaults to all numeric.
     """
     t = driving_df["Time"]
     model_only = driving_df[
@@ -125,7 +133,14 @@ def plot_results(
 
 
 def plot_features_over_time(df: pd.DataFrame) -> None:
-    """Plot every numeric feature over time as stacked Plotly subplots."""
+    """Plot every numeric feature over time as stacked Plotly subplots.
+
+    Args:
+        df: DataFrame containing a Time column and numeric feature columns to plot.
+
+    Returns:
+        None. Displays an interactive Plotly figure.
+    """
     if "Time" not in df.columns:
         raise KeyError("Expected column 'Time' not found in DataFrame.")
 
@@ -139,20 +154,6 @@ def plot_features_over_time(df: pd.DataFrame) -> None:
 
     feature_cols.sort()
     n_features = len(feature_cols)
-
-    if n_features == 1:
-        fig = go.Figure()
-        col = feature_cols[0]
-        fig.add_trace(
-            go.Scatter(x=time_values, y=df[col].values, name=col, mode="lines")
-        )
-        fig.update_layout(
-            title=f"{col} over Time",
-            xaxis_title="Time",
-            yaxis_title="Value",
-        )
-        fig.show()
-        return
 
     max_spacing = 1.0 / (n_features - 0.5)
     vertical_spacing = min(0.01, max_spacing - 1e-4) if n_features > 1 else 0.01
@@ -189,12 +190,18 @@ def plot_new_anomaly_windows(
     window_seconds: float = 1.0,
     feature_cols: list[str] | None = None,
 ) -> None:
-    """
-    Show all numeric features around the first model-only anomaly in one figure. This is more of a proof of concept. 
-    What the FSAE team would see on the dashboard if a fault was detected.
+    """Expand the first model-only anomaly into per-feature windows. 
+    
+    This is a proof of concept that models what the FSAE team would see for each fault found.
 
-    For the plot:
-    Columns = only the first anomaly event, rows = features, with a vertical marker at the anomaly.
+    Args:
+        driving_df: Full driving dataframe with Time and numeric feature columns.
+        anomaly_times: List of timestamps (seconds) where the model flagged anomalies without BMS faults.
+        window_seconds: Window size in seconds to display before and after an anomaly.
+        feature_cols: Optional subset of numeric columns to plot; defaults to all numeric columns except Time.
+
+    Returns:
+        None. Displays an interactive Plotly figure with one column per anomaly and one row per feature.
     """
     if "Time" not in driving_df.columns:
         raise KeyError("Expected column 'Time' not found in DataFrame.")
@@ -260,7 +267,7 @@ def plot_new_anomaly_windows(
         fig.update_xaxes(title_text="Time", row=len(feature_cols), col=c)
 
     fig.update_layout(
-        height=min(140 * len(feature_cols), 1400),
+        height=5000,
         title=f"Model-only anomalies (±{window_seconds:.2f}s)",
         showlegend=True,
         margin=dict(l=60, r=20, t=80, b=40),
@@ -269,7 +276,14 @@ def plot_new_anomaly_windows(
 
 
 def _fault_start_indices(labels: np.ndarray) -> list[int]:
-    """Indices where the fault label rises from 0 to 1."""
+    """Private helper function that computes rising-edge indices for fault labels.
+
+    Args:
+        labels: Array of binary labels over time.
+
+    Returns:
+        List of indices where labels transition from 0 to 1 (fault onset).
+    """
     starts = []
     for i, val in enumerate(labels):
         if val == 1 and (i == 0 or labels[i - 1] == 0):
@@ -280,7 +294,15 @@ def _fault_start_indices(labels: np.ndarray) -> list[int]:
 def early_detection_stats(
     driving_df: pd.DataFrame, lookback_seconds: float = 1.0
 ) -> tuple[int, int, float]:
-    """Count faults detected before their flag and compute average lead time (s)."""
+    """Count faults detected before their flag and compute average lead time (seconds).
+
+    Args:
+        driving_df: DataFrame containing Time, any_bms_fault, and anomalous_flag columns.
+        lookback_seconds: Time window before each fault start to credit early detections.
+
+    Returns:
+        A tuple of (num_fault_segments, num_detected_early, mean_lead_time_seconds).
+    """
     times = driving_df["Time"].astype(float).values
     y_true = driving_df["any_bms_fault"].values
     y_pred = driving_df["anomalous_flag"].values
@@ -307,13 +329,17 @@ def early_detection_stats(
 
 
 def print_evaluation(driving_df: pd.DataFrame, lookback_seconds: float = 1.0) -> None:
-    """
-    Core evaluation focused on: catching true faults and detecting them early.
+    """Print high-level evaluation metrics for anomaly flags vs. BMS faults.
 
-    - Coverage of faults (recall on the fault flag)
-    - False positives on normal points
-    - Early detection stats within lookback_seconds before the fault flag
-    - Count of model-only anomalies (flags with no fault flag)
+    Includes recall on faults, false positives on normal operation, a confusion matrix,
+    model-only anomaly count, and early detection stats within the lookback window.
+
+    Args:
+        driving_df: DataFrame with any_bms_fault and anomalous_flag columns.
+        lookback_seconds: Time window before each fault start to count early detections.
+
+    Returns:
+        None. Metrics are logged.
     """
     # Binary labels (ground truth) 
     y_true = driving_df["any_bms_fault"].values
