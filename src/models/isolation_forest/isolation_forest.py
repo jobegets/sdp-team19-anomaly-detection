@@ -1,26 +1,7 @@
-import sys
-from pathlib import Path
-
-import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import MinMaxScaler
-
-if __package__ is None or __package__ == "":
-    # Allow running as a script from repo root: python src/models/isolation_forest.py
-    sys.path.append(str(Path(__file__).resolve().parents[2]))
-
-from src.utils import (
-    load_driving_data,
-    plot_features_over_time,
-    plot_results,
-    print_evaluation,
-)
-
-repo_root = Path(__file__).resolve().parents[2]
-CSV_PATH = (repo_root / "test-data" / "7-12-2025" / "fsae-7-12 (8).csv").expanduser().resolve()
-ARTIFACT_PATH = (repo_root / "artifacts" / "isolation_forest.pkl").expanduser().resolve()
 
 # Trains and runs isolation forest
 # TODO figure out how to best tune hyperparameters. Also tuning threshold quantile.
@@ -100,26 +81,3 @@ def run_isolation_forest(
     result_df["anomalous_flag"] = (result_df["anomaly_score"] >= threshold).astype(int)
 
     return result_df, threshold, scaler, iso, feature_cols
-
-
-if __name__ == "__main__":
-    driving_df = load_driving_data(CSV_PATH)
-    plot_features_over_time(driving_df)
-    driving_df, threshold, scaler, iso, feature_cols = run_isolation_forest(driving_df)
-
-    # Save model artifact for deployment
-    ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(
-        {
-            "model": iso,
-            "scaler": scaler,
-            "feature_cols": feature_cols,
-            "threshold": threshold,
-            "threshold_quantile": 0.80,
-        },
-        ARTIFACT_PATH,
-    )
-    print(f"Saved model artifact to {ARTIFACT_PATH}")
-
-    plot_results(driving_df, threshold)
-    print_evaluation(driving_df, lookback_seconds=15.0)

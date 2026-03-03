@@ -9,15 +9,16 @@ if __package__ is None or __package__ == "":
 from src.utils import load_driving_data
 
 repo_root = Path(__file__).resolve().parents[2]
-DEFAULT_CSV = repo_root / "test-data" / "7-12-2025" / "fsae-7-12 (8).csv"
+DEFAULT_CSV = repo_root / "test-data" / "2025-07-12" / "2025_07_12-08.csv"
 DEFAULT_ARTIFACT = repo_root / "artifacts" / "isolation_forest.pkl"
 
-def stream_scores(csv_path: Path, artifact_path: Path) -> None:
+def stream_scores(csv_path: Path, artifact_path: Path, sleep_seconds: float = 0.05) -> None:
     """Simulate streaming sensor data and print anomaly scores using a pre-trained model.
 
     Args:
         csv_path: Path to the CSV containing sensor readings.
         artifact_path: Path to a joblib artifact with model, scaler, feature_cols, and threshold.
+        sleep_seconds: Delay between emitted rows in seconds. Use 0 for no delay.
 
     Raises:
         FileNotFoundError: If the artifact path does not exist.
@@ -36,14 +37,18 @@ def stream_scores(csv_path: Path, artifact_path: Path) -> None:
 
     df = load_driving_data(csv_path)
 
-    # simulate streaming at ~0.5 ms per sample
+    if sleep_seconds < 0:
+        raise ValueError("sleep_seconds must be >= 0.")
+
+    # Simulate streaming delay between samples.
     for _, row in df.iterrows():
         X = scaler.transform([row[feature_cols].values])
         score = -iso.decision_function(X)[0]
         flag = int(score >= threshold)
         time_val = row["Time"] if "Time" in row else _
         print(f"t={time_val} score={score:.4f} flag={flag}")
-        time.sleep(0.05)
+        if sleep_seconds:
+            time.sleep(sleep_seconds)
 
 if __name__ == "__main__":
     stream_scores(csv_path=DEFAULT_CSV, artifact_path=DEFAULT_ARTIFACT)
