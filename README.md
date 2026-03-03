@@ -51,14 +51,16 @@ uv run python -m src.main
 ```
 
 Menu options in the REPL:
-1. Choose dataset (global selection)
-2. Train model on selected dataset (always updates artifact)
-3. Evaluate last trained model using its dataset
-4. Compare all trained models from the current REPL session
-5. Auto split train/test:
+1. Choose training dataset (global)
+2. Choose evaluation dataset (global)
+3. Train model on selected training dataset (always updates artifact)
+4. Evaluate last trained model on selected evaluation dataset
+5. Compare all trained models from the current REPL session
+6. Plot results from the last evaluated run
+7. Auto split train/test:
    - Train set: all `NO_FAULTS` datasets
    - Test set: all `HAS_FAULTS` datasets
-6. Exit
+8. Exit
 
 Dataset organization behavior:
 - Non-moving samples are always ignored (`RPM <= 0.5`).

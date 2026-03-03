@@ -11,7 +11,7 @@ from src.models.isolation_forest.isolation_forest_timeseries import (
 from src.repl.dataset_ops import build_auto_split, format_repo_relative, refresh_dataset_summaries
 from src.repl.prompts import prompt_optional_index
 from src.repl.types import AppConfig, SessionState, TrainingRun
-from src.utils import early_detection_stats, load_driving_data, print_evaluation
+from src.utils import early_detection_stats, load_driving_data, plot_results, print_evaluation
 
 
 def choose_model_name(config: AppConfig) -> str | None:
@@ -90,6 +90,26 @@ def score_isolation_forest(
     result_df = driving_df.copy()
     result_df["anomaly_score"] = anomaly_scores
     result_df["any_bms_fault"] = (driving_df["BMS Disch Enable"] == 0).astype(int).values
+    result_df["anomalous_flag"] = (result_df["anomaly_score"] >= threshold).astype(int)
+    return result_df
+
+
+def score_isolation_forest_timeseries(
+    driving_df: pd.DataFrame,
+    *,
+    threshold: float,
+    scaler: object,
+    model: object,
+    feature_cols: list[str],
+    window_size: int,
+) -> pd.DataFrame:
+    """Score a dataframe with an already-trained timeseries IF model."""
+    X_windows, fault_flags, result_df = _build_timeseries_windows(
+        driving_df, feature_cols, window_size
+    )
+    scores = -model.decision_function(scaler.transform(X_windows))
+    result_df["anomaly_score"] = scores
+    result_df["any_bms_fault"] = fault_flags
     result_df["anomalous_flag"] = (result_df["anomaly_score"] >= threshold).astype(int)
     return result_df
 
@@ -196,27 +216,27 @@ def run_auto_split_timeseries(
 
 def train_on_selected_dataset(config: AppConfig, state: SessionState) -> None:
     """Train user-selected model on the selected dataset and store session run."""
-    if state.selected_dataset is None:
-        print("No dataset selected. Choose option 1 first.")
+    if state.selected_training_dataset is None:
+        print("No training dataset selected. Choose option 1 first.")
         return
 
     model_name = choose_model_name(config)
     if model_name is None:
         return
 
-    dataset_label = format_repo_relative(config, state.selected_dataset)
+    dataset_label = format_repo_relative(config, state.selected_training_dataset)
     print(f"\nTraining {model_name} on {dataset_label}...")
-    driving_df = load_driving_data(state.selected_dataset)
+    driving_df = load_driving_data(state.selected_training_dataset)
 
     if model_name == "isolation-forest":
-        result_df, threshold, scaler, model, feature_cols = run_iforest(
+        _, threshold, scaler, model, feature_cols = run_iforest(
             driving_df=driving_df,
             contamination=config.default_contamination,
             threshold_quantile=config.default_threshold_quantile,
         )
         window_size: int | None = None
     else:
-        result_df, threshold, scaler, model, feature_cols = run_iforest_timeseries(
+        _, threshold, scaler, model, feature_cols = run_iforest_timeseries(
             driving_df=driving_df,
             contamination=config.default_contamination,
             threshold_quantile=config.default_threshold_quantile,
@@ -241,12 +261,16 @@ def train_on_selected_dataset(config: AppConfig, state: SessionState) -> None:
         TrainingRun(
             run_id=len(state.trained_runs) + 1,
             model_name=model_name,
-            dataset_label=dataset_label,
+            training_dataset_label=dataset_label,
+            evaluation_dataset_label=None,
             threshold=threshold,
             contamination=config.default_contamination,
             threshold_quantile=config.default_threshold_quantile,
             window_size=window_size,
-            result_df=result_df,
+            scaler=scaler,
+            model=model,
+            feature_cols=feature_cols,
+            result_df=None,
         )
     )
     print(f"Training complete. Session run #{state.trained_runs[-1].run_id} stored.")
@@ -322,11 +346,15 @@ def run_auto_split_training(config: AppConfig, state: SessionState) -> None:
         TrainingRun(
             run_id=len(state.trained_runs) + 1,
             model_name=model_name,
-            dataset_label=split_label,
+            training_dataset_label=split_label,
+            evaluation_dataset_label=split_label,
             threshold=threshold,
             contamination=config.default_contamination,
             threshold_quantile=config.default_threshold_quantile,
             window_size=window_size,
+            scaler=scaler,
+            model=model,
+            feature_cols=feature_cols,
             result_df=result_df,
         )
     )
@@ -338,19 +366,76 @@ def run_auto_split_training(config: AppConfig, state: SessionState) -> None:
 def evaluate_last_trained_model(config: AppConfig, state: SessionState) -> None:
     """Print evaluation for the most recent trained model in this session."""
     if not state.trained_runs:
-        print("No trained model in this session. Train first with option 2.")
+        print("No trained model in this session. Train first with option 3.")
+        return
+
+    if state.selected_evaluation_dataset is None:
+        print("No evaluation dataset selected. Choose option 2 first.")
         return
 
     last_run = state.trained_runs[-1]
+    eval_label = format_repo_relative(config, state.selected_evaluation_dataset)
+    eval_df = load_driving_data(state.selected_evaluation_dataset)
+
+    if last_run.model_name == "isolation-forest":
+        result_df = score_isolation_forest(
+            eval_df,
+            threshold=last_run.threshold,
+            scaler=last_run.scaler,
+            model=last_run.model,
+            feature_cols=last_run.feature_cols,
+        )
+    else:
+        if last_run.window_size is None:
+            raise ValueError("Timeseries run is missing window_size.")
+        result_df = score_isolation_forest_timeseries(
+            eval_df,
+            threshold=last_run.threshold,
+            scaler=last_run.scaler,
+            model=last_run.model,
+            feature_cols=last_run.feature_cols,
+            window_size=last_run.window_size,
+        )
+
+    last_run.result_df = result_df
+    last_run.evaluation_dataset_label = eval_label
+
     print(
         f"\nEvaluating run #{last_run.run_id} "
-        f"({last_run.model_name}) on {last_run.dataset_label}"
+        f"({last_run.model_name}) on {eval_label}"
     )
-    print_evaluation(last_run.result_df, lookback_seconds=config.default_lookback_seconds)
+    print_evaluation(result_df, lookback_seconds=config.default_lookback_seconds)
+
+
+def plot_last_results(state: SessionState) -> None:
+    """Plot the most recent evaluated run in this session."""
+    if not state.trained_runs:
+        print("No trained model in this session. Train first with option 3.")
+        return
+
+    last_run = state.trained_runs[-1]
+    if last_run.result_df is None:
+        print("No evaluation results available for the last run. Evaluate first with option 4.")
+        return
+
+    print(
+        f"\nPlotting run #{last_run.run_id} "
+        f"({last_run.model_name}) "
+        f"on {last_run.evaluation_dataset_label or 'UNKNOWN_DATASET'}"
+    )
+    plot_results(last_run.result_df, threshold=last_run.threshold)
 
 
 def summarize_run_metrics(config: AppConfig, run: TrainingRun) -> dict[str, float | int]:
     """Compute compact metrics used by compare output."""
+    if run.result_df is None:
+        return {
+            "coverage": float("nan"),
+            "fp_rate": float("nan"),
+            "early_hits": -1,
+            "mean_lead": float("nan"),
+        }
+
     y_true = run.result_df["any_bms_fault"].values
     y_pred = run.result_df["anomalous_flag"].values
 
@@ -380,20 +465,33 @@ def compare_session_runs(config: AppConfig, state: SessionState) -> None:
 
     print("\nSession comparison:")
     print(
-        "Run | Model                          | Dataset                              "
+        "Run | Model                          | Train Dataset                        | Eval Dataset                         "
         "| Fault Coverage | FP Rate | Early Hits | Mean Lead (s)"
     )
-    print("-" * 120)
+    print("-" * 170)
 
     for run in state.trained_runs:
         metrics = summarize_run_metrics(config, run)
-        dataset_name = run.dataset_label
+        train_name = run.training_dataset_label
+        eval_name = run.evaluation_dataset_label or "NOT_EVALUATED"
+        if run.result_df is None:
+            coverage_str = "N/A"
+            fp_rate_str = "N/A"
+            early_hits_str = "N/A"
+            mean_lead_str = "N/A"
+        else:
+            coverage_str = f"{metrics['coverage'] * 100:>13.2f}%"
+            fp_rate_str = f"{metrics['fp_rate'] * 100:>7.2f}%"
+            early_hits_str = f"{int(metrics['early_hits']):>10d}"
+            mean_lead_str = f"{float(metrics['mean_lead']):>13.3f}"
+
         print(
             f"{run.run_id:>3} | "
             f"{run.model_name:<30} | "
-            f"{dataset_name[:36]:<36} | "
-            f"{metrics['coverage'] * 100:>13.2f}% | "
-            f"{metrics['fp_rate'] * 100:>7.2f}% | "
-            f"{int(metrics['early_hits']):>10d} | "
-            f"{float(metrics['mean_lead']):>13.3f}"
+            f"{train_name[:36]:<36} | "
+            f"{eval_name[:36]:<36} | "
+            f"{coverage_str:>13} | "
+            f"{fp_rate_str:>7} | "
+            f"{early_hits_str:>10} | "
+            f"{mean_lead_str:>13}"
         )

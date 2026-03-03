@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 from src.repl.prompts import prompt_optional_index
 from src.repl.types import AppConfig, SessionState
@@ -68,8 +69,10 @@ def get_summary_for_path(state: SessionState, csv_path: Path) -> DatasetSummary 
     return None
 
 
-def choose_dataset(config: AppConfig, state: SessionState) -> None:
-    """Show dataset options and update the session-selected dataset."""
+def choose_dataset(
+    config: AppConfig, state: SessionState, target: Literal["train", "eval"]
+) -> None:
+    """Show dataset options and update selected train/eval dataset."""
     refresh_dataset_summaries(config, state)
     if not state.dataset_summaries:
         print(f"No datasets found under {config.dataset_root}")
@@ -95,7 +98,12 @@ def choose_dataset(config: AppConfig, state: SessionState) -> None:
 
     print("\nDatasets:")
     for idx, summary in enumerate(usable_summaries, start=1):
-        marker = " (selected)" if state.selected_dataset == summary.csv_path else ""
+        marker_parts = []
+        if state.selected_training_dataset == summary.csv_path:
+            marker_parts.append("train")
+        if state.selected_evaluation_dataset == summary.csv_path:
+            marker_parts.append("eval")
+        marker = f" ({'/'.join(marker_parts)})" if marker_parts else ""
         print(
             f"{idx:>2}. {format_repo_relative(config, summary.csv_path)} "
             f"[{dataset_label_display(summary)}] "
@@ -112,10 +120,16 @@ def choose_dataset(config: AppConfig, state: SessionState) -> None:
         return
 
     selected_summary = usable_summaries[selected_index - 1]
-    state.selected_dataset = selected_summary.csv_path
+    if target == "train":
+        state.selected_training_dataset = selected_summary.csv_path
+        target_label = "training"
+    else:
+        state.selected_evaluation_dataset = selected_summary.csv_path
+        target_label = "evaluation"
+
     print(
-        "Selected dataset: "
-        f"{format_repo_relative(config, state.selected_dataset)} "
+        f"Selected {target_label} dataset: "
+        f"{format_repo_relative(config, selected_summary.csv_path)} "
         f"({dataset_label_display(selected_summary)}, "
         f"moving={selected_summary.driving_rows}, faults={selected_summary.fault_rows})"
     )

@@ -9,6 +9,7 @@ from src.repl.prompts import prompt_menu_choice
 from src.repl.training_ops import (
     compare_session_runs,
     evaluate_last_trained_model,
+    plot_last_results,
     run_auto_split_training,
     train_on_selected_dataset,
 )
@@ -17,35 +18,57 @@ from src.repl.types import AppConfig, SessionState
 
 def print_repl_menu(config: AppConfig, state: SessionState) -> None:
     """Render REPL menu with session context."""
-    if state.selected_dataset is not None:
-        summary = get_summary_for_path(state, state.selected_dataset)
+    if state.selected_training_dataset is not None:
+        summary = get_summary_for_path(state, state.selected_training_dataset)
         if summary is None:
-            selected_dataset = format_repo_relative(config, state.selected_dataset)
+            selected_training_dataset = format_repo_relative(
+                config, state.selected_training_dataset
+            )
         else:
-            selected_dataset = (
-                f"{format_repo_relative(config, state.selected_dataset)} "
+            selected_training_dataset = (
+                f"{format_repo_relative(config, state.selected_training_dataset)} "
                 f"[{dataset_label_display(summary)} | "
                 f"moving={summary.driving_rows} faults={summary.fault_rows}]"
             )
     else:
-        selected_dataset = "None"
+        selected_training_dataset = "None"
+
+    if state.selected_evaluation_dataset is not None:
+        summary = get_summary_for_path(state, state.selected_evaluation_dataset)
+        if summary is None:
+            selected_evaluation_dataset = format_repo_relative(
+                config, state.selected_evaluation_dataset
+            )
+        else:
+            selected_evaluation_dataset = (
+                f"{format_repo_relative(config, state.selected_evaluation_dataset)} "
+                f"[{dataset_label_display(summary)} | "
+                f"moving={summary.driving_rows} faults={summary.fault_rows}]"
+            )
+    else:
+        selected_evaluation_dataset = "None"
 
     last_run = state.trained_runs[-1] if state.trained_runs else None
     last_run_label = (
-        f"#{last_run.run_id} {last_run.model_name} ({last_run.dataset_label})"
+        f"#{last_run.run_id} {last_run.model_name} "
+        f"(train={last_run.training_dataset_label}, "
+        f"eval={last_run.evaluation_dataset_label or 'NOT_EVALUATED'})"
         if last_run
         else "None"
     )
 
     print("\n=== Anomaly Detection REPL ===")
-    print(f"Selected dataset: {selected_dataset}")
+    print(f"Selected training dataset: {selected_training_dataset}")
+    print(f"Selected evaluation dataset: {selected_evaluation_dataset}")
     print(f"Last trained model: {last_run_label}")
-    print("1. Choose dataset")
-    print("2. Train model on chosen dataset (always updates artifact)")
-    print("3. Evaluate on last trained model using its dataset")
-    print("4. Compare trained models in this session")
-    print("5. Auto split train/test (NO_FAULTS train, HAS_FAULTS test)")
-    print("6. Exit")
+    print("1. Choose training dataset")
+    print("2. Choose evaluation dataset")
+    print("3. Train model on chosen training dataset (always updates artifact)")
+    print("4. Evaluate last trained model on chosen evaluation dataset")
+    print("5. Compare trained models in this session")
+    print("6. Plot results from last evaluated run")
+    print("7. Auto split train/test (NO_FAULTS train, HAS_FAULTS test)")
+    print("8. Exit")
 
 
 def run_repl(config: AppConfig) -> int:
@@ -70,19 +93,23 @@ def run_repl(config: AppConfig) -> int:
     while True:
         print_repl_menu(config, state)
         choice = prompt_menu_choice(
-            "Select option [1-6]: ", {"1", "2", "3", "4", "5", "6"}
+            "Select option [1-8]: ", {"1", "2", "3", "4", "5", "6", "7", "8"}
         )
 
         try:
             if choice == "1":
-                choose_dataset(config, state)
+                choose_dataset(config, state, target="train")
             elif choice == "2":
-                train_on_selected_dataset(config, state)
+                choose_dataset(config, state, target="eval")
             elif choice == "3":
-                evaluate_last_trained_model(config, state)
+                train_on_selected_dataset(config, state)
             elif choice == "4":
-                compare_session_runs(config, state)
+                evaluate_last_trained_model(config, state)
             elif choice == "5":
+                compare_session_runs(config, state)
+            elif choice == "6":
+                plot_last_results(state)
+            elif choice == "7":
                 run_auto_split_training(config, state)
             else:
                 print("Exiting REPL.")

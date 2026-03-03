@@ -23,16 +23,21 @@ class AppConfig:
 class TrainingRun:
     run_id: int
     model_name: str
-    dataset_label: str
+    training_dataset_label: str
+    evaluation_dataset_label: str | None
     threshold: float
     contamination: float
     threshold_quantile: float
     window_size: int | None
-    result_df: pd.DataFrame
+    scaler: object
+    model: object
+    feature_cols: list[str]
+    result_df: pd.DataFrame | None = None
 
 
 @dataclass
 class SessionState:
-    selected_dataset: Path | None = None
+    selected_training_dataset: Path | None = None
+    selected_evaluation_dataset: Path | None = None
     dataset_summaries: list[DatasetSummary] = field(default_factory=list)
     trained_runs: list[TrainingRun] = field(default_factory=list)
