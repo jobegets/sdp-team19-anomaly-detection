@@ -55,6 +55,15 @@ Menu options in the REPL:
 2. Train model on selected dataset (always updates artifact)
 3. Evaluate last trained model using its dataset
 4. Compare all trained models from the current REPL session
+5. Auto split train/test:
+   - Train set: all `NO_FAULTS` datasets
+   - Test set: all `HAS_FAULTS` datasets
+6. Exit
+
+Dataset organization behavior:
+- Non-moving samples are always ignored (`RPM <= 0.5`).
+- Dataset picker shows labels (`HAS_FAULTS`, `NO_FAULTS`) and excludes datasets that are empty after filtering.
+- A dataset manifest is written to `artifacts/dataset_manifest.csv` each session start.
 
 ### Debugging
 
