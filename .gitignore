@@ -12,3 +12,5 @@ test-data/
 
 # model artifact
 /artifacts
+
+.vscode/
