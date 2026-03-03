@@ -1,25 +1,7 @@
-import sys
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import MinMaxScaler
-
-if __package__ is None or __package__ == "":
-    # Allow running as a script from repo root: python src/models/isolation_forest_timeseries.py
-    sys.path.append(str(Path(__file__).resolve().parents[2]))
-
-from src.utils import (
-    load_driving_data,
-    plot_features_over_time,
-    plot_results,
-    print_evaluation,
-)
-
-
-repo_root = Path(__file__).resolve().parents[2]
-CSV_PATH = (repo_root / "test-data" / "7-12-2025" / "fsae-7-12 (8).csv").expanduser().resolve()
 
 # Trains and runs isolation forest on rolling-mean features
 def run_isolation_forest(
@@ -28,7 +10,7 @@ def run_isolation_forest(
     window_size: int = 25,
     contamination: float = 0.01,
     random_state: int = 42,
-) -> tuple[pd.DataFrame, float]:
+) -> tuple[pd.DataFrame, float, MinMaxScaler, IsolationForest, list[str]]:
     """Train IsolationForest on rolling-mean windows and flag anomalies.
 
     Args:
@@ -41,6 +23,9 @@ def run_isolation_forest(
     Returns:
         result_df: Window-aligned copy with new anomaly_score, any_bms_fault, anomalous_flag.
         threshold: Score cutoff derived from threshold_quantile.
+        scaler: Fitted MinMaxScaler.
+        iso: Fitted IsolationForest model.
+        feature_cols: List of original feature column names used for training.
 
     Raises:
         KeyError: If required columns (Time, BMS Disch Enable) are missing.
@@ -118,12 +103,4 @@ def run_isolation_forest(
     threshold = float(np.quantile(anomaly_scores, threshold_quantile))
     result_df["anomalous_flag"] = (result_df["anomaly_score"] >= threshold).astype(int)
 
-    return result_df, threshold
-
-
-if __name__ == "__main__":
-    driving_df = load_driving_data(CSV_PATH)
-    driving_df, threshold = run_isolation_forest(driving_df)
-    plot_results(driving_df, threshold)
-    print_evaluation(driving_df, lookback_seconds=15.0)
-    plot_features_over_time(driving_df)
+    return result_df, threshold, scaler, iso, feature_cols

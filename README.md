@@ -39,8 +39,33 @@ https://gweb-coral-full.uc.r.appspot.com/docs/dev-board/get-started/#connect-via
 3. Clone this repo: `git clone https://github.com/jobegets/sdp-team19-anomaly-detection.git`
 4. ^ Follow steps above. Setup venv and huggingface.
    4.1. Might need to install newer python version. You can do this easily with uv (while in venv)! `uv python install 3.13`
-5. Run model/simulation: `uv run src/deploy/coral_inference.py`
+5. Run application REPL: `uv run python -m src.main`
 6. pray
+
+### CLI
+
+Use the centralized REPL entrypoint:
+
+```bash
+uv run python -m src.main
+```
+
+Menu options in the REPL:
+1. Choose training dataset (global)
+2. Choose evaluation dataset (global)
+3. Train model on selected training dataset (always updates artifact)
+4. Evaluate last trained model on selected evaluation dataset
+5. Compare all trained models from the current REPL session
+6. Plot results from the last evaluated run
+7. Auto split train/test:
+   - Train set: all `NO_FAULTS` datasets
+   - Test set: all `HAS_FAULTS` datasets
+8. Exit
+
+Dataset organization behavior:
+- Non-moving samples are always ignored (`RPM <= 0.5`).
+- Dataset picker shows labels (`HAS_FAULTS`, `NO_FAULTS`) and excludes datasets that are empty after filtering.
+- A dataset manifest is written to `artifacts/dataset_manifest.csv` each session start.
 
 ### Debugging
 

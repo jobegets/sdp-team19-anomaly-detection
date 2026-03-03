@@ -7,8 +7,8 @@ from plotly.subplots import make_subplots
 def plot_results(
     driving_df: pd.DataFrame,
     threshold: float,
-    window_seconds: float = 1.0,
-    feature_cols: list[str] | None = None,
+    # window_seconds: float = 1.0,
+    # feature_cols: list[str] | None = None,
 ) -> None:
     """Visualize anomaly scores, flags, and key pack signals.
 
@@ -123,156 +123,157 @@ def plot_results(
 
     fig.show()
 
-    if not model_only.empty:
-        plot_new_anomaly_windows(
-            driving_df,
-            anomaly_times=model_only["Time"].astype(float).tolist(),
-            window_seconds=window_seconds,
-            feature_cols=feature_cols,
-        )
+    # if not model_only.empty:
+    #     plot_new_anomaly_windows(
+    #         driving_df,
+    #         anomaly_times=model_only["Time"].astype(float).tolist(),
+    #         window_seconds=window_seconds,
+    #         feature_cols=feature_cols,
+    #     )
 
+# TODO: Keeping as an experimental feature.
+# def plot_features_over_time(df: pd.DataFrame) -> None:
+#     """Plot every numeric feature over time as stacked Plotly subplots.
 
-def plot_features_over_time(df: pd.DataFrame) -> None:
-    """Plot every numeric feature over time as stacked Plotly subplots.
+#     Args:
+#         df: DataFrame containing a Time column and numeric feature columns to plot.
 
-    Args:
-        df: DataFrame containing a Time column and numeric feature columns to plot.
+#     Returns:
+#         None. Displays an interactive Plotly figure.
+#     """
+#     if "Time" not in df.columns:
+#         raise KeyError("Expected column 'Time' not found in DataFrame.")
 
-    Returns:
-        None. Displays an interactive Plotly figure.
-    """
-    if "Time" not in df.columns:
-        raise KeyError("Expected column 'Time' not found in DataFrame.")
+#     time_values = df["Time"].values
+#     feature_cols = [
+#         col for col in df.select_dtypes(include=["number"]).columns if col != "Time"
+#     ]
 
-    time_values = df["Time"].values
-    feature_cols = [
-        col for col in df.select_dtypes(include=["number"]).columns if col != "Time"
-    ]
+#     if not feature_cols:
+#         return
 
-    if not feature_cols:
-        return
+#     feature_cols.sort()
+#     n_features = len(feature_cols)
 
-    feature_cols.sort()
-    n_features = len(feature_cols)
+#     max_spacing = 1.0 / (n_features - 0.5)
+#     vertical_spacing = min(0.01, max_spacing - 1e-4) if n_features > 1 else 0.01
 
-    max_spacing = 1.0 / (n_features - 0.5)
-    vertical_spacing = min(0.01, max_spacing - 1e-4) if n_features > 1 else 0.01
+#     fig = make_subplots(
+#         rows=n_features,
+#         cols=1,
+#         shared_xaxes=True,
+#         vertical_spacing=vertical_spacing,
+#         subplot_titles=feature_cols,
+#     )
 
-    fig = make_subplots(
-        rows=n_features,
-        cols=1,
-        shared_xaxes=True,
-        vertical_spacing=vertical_spacing,
-        subplot_titles=feature_cols,
-    )
+#     for i, col in enumerate(feature_cols, start=1):
+#         fig.add_trace(
+#             go.Scatter(x=time_values, y=df[col].values, name=col, mode="lines"),
+#             row=i,
+#             col=1,
+#         )
 
-    for i, col in enumerate(feature_cols, start=1):
-        fig.add_trace(
-            go.Scatter(x=time_values, y=df[col].values, name=col, mode="lines"),
-            row=i,
-            col=1,
-        )
+#     fig.update_xaxes(title_text="Time", row=n_features, col=1)
+#     fig.update_layout(
+#         height=min(150 * n_features, 1200),
+#         showlegend=False,
+#         title="Features over Time",
+#         margin=dict(l=60, r=20, t=80, b=40),
+#     )
 
-    fig.update_xaxes(title_text="Time", row=n_features, col=1)
-    fig.update_layout(
-        height=min(150 * n_features, 1200),
-        showlegend=False,
-        title="Features over Time",
-        margin=dict(l=60, r=20, t=80, b=40),
-    )
+#     fig.show()
 
-    fig.show()
-
-
-def plot_new_anomaly_windows(
-    driving_df: pd.DataFrame,
-    anomaly_times: list[float],
-    window_seconds: float = 1.0,
-    feature_cols: list[str] | None = None,
-) -> None:
-    """Expand the first model-only anomaly into per-feature windows. 
+# TODO: Keeping as an experimental feature.
+#
+# def plot_new_anomaly_windows(
+#     driving_df: pd.DataFrame,
+#     anomaly_times: list[float],
+#     window_seconds: float = 1.0,
+#     feature_cols: list[str] | None = None,
+# ) -> None:
+#     """Expand the first model-only anomaly into per-feature windows. 
     
-    This is a proof of concept that models what the FSAE team would see for each fault found.
+#     This is a proof of concept that models what the FSAE team would see for each fault found.
 
-    Args:
-        driving_df: Full driving dataframe with Time and numeric feature columns.
-        anomaly_times: List of timestamps (seconds) where the model flagged anomalies without BMS faults.
-        window_seconds: Window size in seconds to display before and after an anomaly.
-        feature_cols: Optional subset of numeric columns to plot; defaults to all numeric columns except Time.
+#     Args:
+#         driving_df: Full driving dataframe with Time and numeric feature columns.
+#         anomaly_times: List of timestamps (seconds) where the model flagged anomalies without BMS faults.
+#         window_seconds: Window size in seconds to display before and after an anomaly.
+#         feature_cols: Optional subset of numeric columns to plot; defaults to all numeric columns except Time.
 
-    Returns:
-        None. Displays an interactive Plotly figure with one column per anomaly and one row per feature.
-    """
-    if "Time" not in driving_df.columns:
-        raise KeyError("Expected column 'Time' not found in DataFrame.")
+#     Returns:
+#         None. Displays an interactive Plotly figure with one column per anomaly and one row per feature.
+#     """
+#     if "Time" not in driving_df.columns:
+#         raise KeyError("Expected column 'Time' not found in DataFrame.")
 
-    if feature_cols is None:
-        feature_cols = [
-            col
-            for col in driving_df.select_dtypes(include=["number"]).columns
-            if col != "Time"
-        ]
+#     if feature_cols is None:
+#         feature_cols = [
+#             col
+#             for col in driving_df.select_dtypes(include=["number"]).columns
+#             if col != "Time"
+#         ]
 
-    if not feature_cols:
-        print("No numeric feature columns available to plot.")
-        return
+#     if not feature_cols:
+#         print("No numeric feature columns available to plot.")
+#         return
 
-    if not anomaly_times:
-        print("No new anomalies to visualize.")
-        return
+#     if not anomaly_times:
+#         print("No new anomalies to visualize.")
+#         return
 
-    times = driving_df["Time"].astype(float)
-    event_times = sorted(anomaly_times)[:1]  # only the first anomaly
+#     times = driving_df["Time"].astype(float)
+#     event_times = sorted(anomaly_times)[:1]  # only the first anomaly
 
-    fig = make_subplots(
-        rows=len(feature_cols),
-        cols=len(event_times),
-        shared_xaxes=False,
-        shared_yaxes=False,
-        vertical_spacing=0.02,
-        horizontal_spacing=0.04,
-        column_titles=[f"t={t:.3f}s" for t in event_times],
-    )
+#     fig = make_subplots(
+#         rows=len(feature_cols),
+#         cols=len(event_times),
+#         shared_xaxes=False,
+#         shared_yaxes=False,
+#         vertical_spacing=0.02,
+#         horizontal_spacing=0.04,
+#         column_titles=[f"t={t:.3f}s" for t in event_times],
+#     )
 
-    for c, event_time in enumerate(event_times, start=1):
-        mask = (times >= event_time - window_seconds) & (times <= event_time + window_seconds)
-        window_df = driving_df.loc[mask, ["Time"] + feature_cols]
+#     for c, event_time in enumerate(event_times, start=1):
+#         mask = (times >= event_time - window_seconds) & (times <= event_time + window_seconds)
+#         window_df = driving_df.loc[mask, ["Time"] + feature_cols]
 
-        if window_df.empty:
-            continue
+#         if window_df.empty:
+#             continue
 
-        for r, col in enumerate(feature_cols, start=1):
-            fig.add_trace(
-                go.Scatter(
-                    x=window_df["Time"],
-                    y=window_df[col],
-                    name=col if c == 1 else None,  # legend once
-                    mode="lines",
-                    showlegend=(c == 1),
-                ),
-                row=r,
-                col=c,
-            )
-            fig.add_vline(
-                x=event_time,
-                line_width=1,
-                line_dash="dot",
-                line_color="orange",
-                row=r,
-                col=c,
-            )
-            if c == 1:
-                fig.update_yaxes(title_text=col, row=r, col=c)
+#         for r, col in enumerate(feature_cols, start=1):
+#             fig.add_trace(
+#                 go.Scatter(
+#                     x=window_df["Time"],
+#                     y=window_df[col],
+#                     name=col if c == 1 else None,  # legend once
+#                     mode="lines",
+#                     showlegend=(c == 1),
+#                 ),
+#                 row=r,
+#                 col=c,
+#             )
+#             fig.add_vline(
+#                 x=event_time,
+#                 line_width=1,
+#                 line_dash="dot",
+#                 line_color="orange",
+#                 row=r,
+#                 col=c,
+#             )
+#             if c == 1:
+#                 fig.update_yaxes(title_text=col, row=r, col=c)
 
-        fig.update_xaxes(title_text="Time", row=len(feature_cols), col=c)
+#         fig.update_xaxes(title_text="Time", row=len(feature_cols), col=c)
 
-    fig.update_layout(
-        height=5000,
-        title=f"Model-only anomalies (±{window_seconds:.2f}s)",
-        showlegend=True,
-        margin=dict(l=60, r=20, t=80, b=40),
-    )
-    fig.show()
+#     fig.update_layout(
+#         height=5000,
+#         title=f"Model-only anomalies (±{window_seconds:.2f}s)",
+#         showlegend=True,
+#         margin=dict(l=60, r=20, t=80, b=40),
+#     )
+#     fig.show()
 
 
 def _fault_start_indices(labels: np.ndarray) -> list[int]:
