@@ -29,9 +29,8 @@ class LSTMAutoencoder(nn.Module):
             batch_first=True,
         )
         self.to_latent = nn.Linear(hidden_dim, latent_dim)
-        self.from_latent = nn.Linear(latent_dim, hidden_dim)
         self.decoder = nn.LSTM(
-            input_size=hidden_dim,
+            input_size=latent_dim,
             hidden_size=hidden_dim,
             num_layers=num_layers,
             batch_first=True,
@@ -40,8 +39,7 @@ class LSTMAutoencoder(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         _, (hidden, _) = self.encoder(x)
-        latent = self.to_latent(hidden[-1])
-        repeated = self.from_latent(latent).unsqueeze(1).repeat(1, x.size(1), 1)
+        repeated = self.to_latent(hidden[-1]).unsqueeze(1).repeat(1, x.size(1), 1)
         decoded, _ = self.decoder(repeated)
         return self.output(decoded)
 

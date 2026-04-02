@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -28,6 +28,27 @@ class Autoencoder(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.decoder(self.encoder(x))
+
+
+def _format_score_percentiles(scores: np.ndarray) -> str:
+    """Format compact score percentile diagnostics."""
+    pcts = np.quantile(scores, [0.0, 0.25, 0.5, 0.75, 0.9, 0.99, 1.0])
+    labels = ("min", "p25", "p50", "p75", "p90", "p99", "max")
+    return ", ".join(f"{label}={value:.6g}" for label, value in zip(labels, pcts))
+
+
+def _top_feature_error_contributors(
+    inputs: np.ndarray,
+    reconstructed: np.ndarray,
+    feature_cols: list[str],
+    top_k: int = 5,
+) -> str:
+    """Return the top mean per-feature reconstruction errors as a compact string."""
+    feature_errors = np.mean((reconstructed - inputs) ** 2, axis=0)
+    top_indices = np.argsort(feature_errors)[::-1][: min(top_k, len(feature_cols))]
+    return ", ".join(
+        f"{feature_cols[idx]}={feature_errors[idx]:.6g}" for idx in top_indices
+    )
 
 
 def run_autoencoder(
@@ -91,11 +112,34 @@ def run_autoencoder(
 
     model.eval()
     with torch.no_grad():
+        X_normal_tensor = torch.from_numpy(X_normal_scaled)
+        reconstructed_normal = model(X_normal_tensor)
+        normal_scores = torch.mean(
+            (reconstructed_normal - X_normal_tensor) ** 2, dim=1
+        ).numpy()
+
         X_tensor = torch.from_numpy(X_full_scaled)
         reconstructed = model(X_tensor)
         anomaly_scores = torch.mean((reconstructed - X_tensor) ** 2, dim=1).numpy()
+        reconstructed_full = reconstructed.numpy()
 
     threshold = float(np.quantile(anomaly_scores, threshold_quantile))
+
+    print("\n[autoencoder] Training diagnostics")
+    print(f"Threshold quantile: {threshold_quantile:.3f}")
+    print(f"Threshold: {threshold:.6g}")
+    print(
+        "Normal-train score percentiles: "
+        f"{_format_score_percentiles(normal_scores)}"
+    )
+    print(
+        "Train/all score percentiles: "
+        f"{_format_score_percentiles(anomaly_scores)}"
+    )
+    print(
+        "Top train feature reconstruction errors: "
+        f"{_top_feature_error_contributors(X_full_scaled, reconstructed_full, feature_cols)}"
+    )
 
     result_df = driving_df.copy()
     result_df["anomaly_score"] = anomaly_scores
