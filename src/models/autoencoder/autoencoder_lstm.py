@@ -1,6 +1,3 @@
-import joblib
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import torch
@@ -8,9 +5,7 @@ from sklearn.preprocessing import MinMaxScaler
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-ARTIFACT_PATH = (
-    Path(__file__).resolve().parents[3] / "artifacts" / "autoencoder_lstm.pkl"
-).resolve()
+from src.models.training_artifacts import save_training_artifact
 
 
 class LSTMAutoencoder(nn.Module):
@@ -55,6 +50,7 @@ def run_autoencoder(
     latent_dim: int = 16,
     num_layers: int = 1,
     random_state: int = 42,
+    dataset_reference: str | None = None,
 ) -> tuple[pd.DataFrame, float, MinMaxScaler, LSTMAutoencoder, list[str]]:
     """Train an LSTM autoencoder on sliding windows and score all windows."""
     required_cols = ["Time", "BMS Disch Enable"]
@@ -136,18 +132,15 @@ def run_autoencoder(
     result_df["any_bms_fault"] = fault_flags_seq
     result_df["anomalous_flag"] = (result_df["anomaly_score"] >= threshold).astype(int)
 
-    ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(
-        {
-            "model_name": "autoencoder-lstm",
-            "model": model,
-            "scaler": scaler,
-            "feature_cols": feature_cols,
-            "threshold": threshold,
-            "threshold_quantile": threshold_quantile,
-            "window_size": window_size,
-        },
-        ARTIFACT_PATH,
+    save_training_artifact(
+        model_name="autoencoder-lstm",
+        dataset_reference=dataset_reference,
+        threshold=threshold,
+        scaler=scaler,
+        model=model,
+        feature_cols=feature_cols,
+        threshold_quantile=threshold_quantile,
+        window_size=window_size,
     )
 
     return result_df, threshold, scaler, model, feature_cols

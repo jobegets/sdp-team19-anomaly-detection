@@ -1,6 +1,3 @@
-import joblib
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import torch
@@ -8,7 +5,7 @@ from sklearn.preprocessing import MinMaxScaler
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-ARTIFACT_PATH = (Path(__file__).resolve().parents[3] / "artifacts" / "autoencoder.pkl").resolve()
+from src.models.training_artifacts import save_training_artifact
 
 
 class Autoencoder(nn.Module):
@@ -60,6 +57,7 @@ def run_autoencoder(
     hidden_dim: int = 16,
     latent_dim: int = 8,
     random_state: int = 42,
+    dataset_reference: str | None = None,
 ) -> tuple[pd.DataFrame, float, MinMaxScaler, Autoencoder, list[str]]:
     """Train a simple autoencoder on normal data and score all points."""
     required_cols = ["Time", "BMS Disch Enable"]
@@ -146,17 +144,14 @@ def run_autoencoder(
     result_df["any_bms_fault"] = fault_flags.values
     result_df["anomalous_flag"] = (result_df["anomaly_score"] >= threshold).astype(int)
 
-    ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(
-        {
-            "model_name": "autoencoder",
-            "model": model,
-            "scaler": scaler,
-            "feature_cols": feature_cols,
-            "threshold": threshold,
-            "threshold_quantile": threshold_quantile,
-        },
-        ARTIFACT_PATH,
+    save_training_artifact(
+        model_name="autoencoder",
+        dataset_reference=dataset_reference,
+        threshold=threshold,
+        scaler=scaler,
+        model=model,
+        feature_cols=feature_cols,
+        threshold_quantile=threshold_quantile,
     )
 
     return result_df, threshold, scaler, model, feature_cols

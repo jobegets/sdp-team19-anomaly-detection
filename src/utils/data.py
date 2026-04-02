@@ -10,11 +10,11 @@ DATA_COLUMNS = [
     # Battery
     "Pack Voltage",
     "Pack Current",
-    # "Pack Temp", High MSE
+    "Pack Temp", High MSE
     "State of Charge",
     "Min Cell Voltage",
-    # "BMS LV input", High MSE
-    # Powertrain / inverter / motor
+    "BMS LV input", High MSE
+    #Powertrain / inverter / motor
     "Torque Feedback",
     "RPM",
     "Flux Feedback",

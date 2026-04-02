@@ -5,8 +5,6 @@ from src.repl import AppConfig, run_repl
 # Keep primary app constants centralized here.
 REPO_ROOT = Path(__file__).resolve().parent
 DATASET_ROOT = (REPO_ROOT / "test-data").resolve()
-ARTIFACT_PATH = (REPO_ROOT / "artifacts" / "isolation_forest.pkl").resolve()
-
 DEFAULT_CONTAMINATION = 0.01
 DEFAULT_THRESHOLD_QUANTILE = 0.99
 DEFAULT_WINDOW_SIZE = 25
@@ -25,7 +23,6 @@ def build_config() -> AppConfig:
     return AppConfig(
         repo_root=REPO_ROOT,
         dataset_root=DATASET_ROOT,
-        artifact_path=ARTIFACT_PATH,
         default_contamination=DEFAULT_CONTAMINATION,
         default_threshold_quantile=DEFAULT_THRESHOLD_QUANTILE,
         default_window_size=DEFAULT_WINDOW_SIZE,

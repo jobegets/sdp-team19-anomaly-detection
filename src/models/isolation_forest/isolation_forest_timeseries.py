@@ -3,6 +3,8 @@ import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import MinMaxScaler
 
+from src.models.training_artifacts import save_training_artifact
+
 # Trains and runs isolation forest on rolling-mean features
 def run_isolation_forest(
     driving_df: pd.DataFrame,
@@ -10,6 +12,7 @@ def run_isolation_forest(
     window_size: int = 25,
     contamination: float = 0.01,
     random_state: int = 42,
+    dataset_reference: str | None = None,
 ) -> tuple[pd.DataFrame, float, MinMaxScaler, IsolationForest, list[str]]:
     """Train IsolationForest on rolling-mean windows and flag anomalies.
 
@@ -102,5 +105,17 @@ def run_isolation_forest(
     # Flag anomalies based on given threshold quantile
     threshold = float(np.quantile(anomaly_scores, threshold_quantile))
     result_df["anomalous_flag"] = (result_df["anomaly_score"] >= threshold).astype(int)
+
+    save_training_artifact(
+        model_name="isolation-forest-timeseries",
+        dataset_reference=dataset_reference,
+        threshold=threshold,
+        scaler=scaler,
+        model=iso,
+        feature_cols=feature_cols,
+        contamination=contamination,
+        threshold_quantile=threshold_quantile,
+        window_size=window_size,
+    )
 
     return result_df, threshold, scaler, iso, feature_cols

@@ -3,6 +3,8 @@ import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import MinMaxScaler
 
+from src.models.training_artifacts import save_training_artifact
+
 # Trains and runs isolation forest
 # TODO figure out how to best tune hyperparameters. Also tuning threshold quantile.
 def run_isolation_forest(
@@ -10,6 +12,7 @@ def run_isolation_forest(
     contamination: float = 0.01,
     threshold_quantile: float = 0.80,
     random_state: int = 42,
+    dataset_reference: str | None = None,
 ) -> tuple[pd.DataFrame, float, MinMaxScaler, IsolationForest, list[str]]:
     """Train IsolationForest on normal data and score all points.
 
@@ -79,5 +82,16 @@ def run_isolation_forest(
     # Flag anomalies based on given threshold quantile
     threshold = float(np.quantile(anomaly_scores, threshold_quantile))
     result_df["anomalous_flag"] = (result_df["anomaly_score"] >= threshold).astype(int)
+
+    save_training_artifact(
+        model_name="isolation-forest",
+        dataset_reference=dataset_reference,
+        threshold=threshold,
+        scaler=scaler,
+        model=iso,
+        feature_cols=feature_cols,
+        contamination=contamination,
+        threshold_quantile=threshold_quantile,
+    )
 
     return result_df, threshold, scaler, iso, feature_cols

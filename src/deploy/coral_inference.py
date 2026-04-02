@@ -2,15 +2,18 @@ import sys
 import time
 from pathlib import Path
 import joblib
+import serial
+import io
 
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
+from src.models.training_artifacts import ARTIFACT_PATHS
 from src.utils import load_driving_data
 
 repo_root = Path(__file__).resolve().parents[2]
 DEFAULT_CSV = repo_root / "test-data" / "2025-07-12" / "2025_07_12-08.csv"
-DEFAULT_ARTIFACT = repo_root / "artifacts" / "isolation_forest.pkl"
+DEFAULT_ARTIFACT = ARTIFACT_PATHS["isolation-forest"]
 
 def stream_scores(csv_path: Path, artifact_path: Path, sleep_seconds: float = 0.05) -> None:
     """Simulate streaming sensor data and print anomaly scores using a pre-trained model.

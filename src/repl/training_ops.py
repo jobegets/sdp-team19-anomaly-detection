@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import joblib
 import numpy as np
 import pandas as pd
 
@@ -48,44 +47,6 @@ def choose_model_name(config: AppConfig) -> str | None:
         print("Model selection canceled.")
         return None
     return config.model_options[selected_index - 1][0]
-
-
-def save_training_artifact(
-    config: AppConfig,
-    *,
-    model_name: str,
-    dataset_reference: str,
-    threshold: float,
-    scaler: object,
-    model: object,
-    feature_cols: list[str],
-    contamination: float,
-    threshold_quantile: float,
-    window_size: int | None,
-) -> None:
-    """Persist training outputs. This is always called after training."""
-    payload: dict[str, object] = {
-        "model_name": model_name,
-        "dataset_path": dataset_reference,
-        "model": model,
-        "scaler": scaler,
-        "feature_cols": feature_cols,
-        "threshold": threshold,
-        "contamination": contamination,
-        "threshold_quantile": threshold_quantile,
-    }
-    if window_size is not None:
-        payload["window_size"] = window_size
-
-    artifact_path = config.artifact_path
-    if model_name == "autoencoder":
-        artifact_path = (config.repo_root / "artifacts" / "autoencoder.pkl").resolve()
-    elif model_name == "autoencoder-lstm":
-        artifact_path = (config.repo_root / "artifacts" / "autoencoder_lstm.pkl").resolve()
-
-    artifact_path.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(payload, artifact_path)
-    print(f"Artifact updated: {artifact_path}")
 
 
 def concatenate_driving_data(csv_paths: list[Path]) -> pd.DataFrame:
@@ -260,6 +221,7 @@ def train_on_selected_dataset(config: AppConfig, state: SessionState) -> None:
             driving_df=driving_df,
             contamination=config.default_contamination,
             threshold_quantile=config.default_threshold_quantile,
+            dataset_reference=dataset_label,
         )
         window_size: int | None = None
     elif model_name == "isolation-forest-timeseries":
@@ -268,6 +230,7 @@ def train_on_selected_dataset(config: AppConfig, state: SessionState) -> None:
             contamination=config.default_contamination,
             threshold_quantile=config.default_threshold_quantile,
             window_size=config.default_window_size,
+            dataset_reference=dataset_label,
         )
         window_size = config.default_window_size
     elif model_name == "autoencoder":
@@ -276,6 +239,7 @@ def train_on_selected_dataset(config: AppConfig, state: SessionState) -> None:
         _, threshold, scaler, model, feature_cols = run_autoencoder(
             driving_df=driving_df,
             threshold_quantile=config.default_threshold_quantile,
+            dataset_reference=dataset_label,
         )
         window_size = None
     elif model_name == "autoencoder-lstm":
@@ -285,23 +249,11 @@ def train_on_selected_dataset(config: AppConfig, state: SessionState) -> None:
             driving_df=driving_df,
             threshold_quantile=config.default_threshold_quantile,
             window_size=config.default_window_size,
+            dataset_reference=dataset_label,
         )
         window_size = config.default_window_size
     else:
         raise ValueError(f"Unsupported model: {model_name}")
-
-    save_training_artifact(
-        config,
-        model_name=model_name,
-        dataset_reference=dataset_label,
-        threshold=threshold,
-        scaler=scaler,
-        model=model,
-        feature_cols=feature_cols,
-        contamination=config.default_contamination,
-        threshold_quantile=config.default_threshold_quantile,
-        window_size=window_size,
-    )
 
     state.trained_runs.append(
         TrainingRun(
