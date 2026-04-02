@@ -3,6 +3,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+from .severity import SEVERITY_ORDER, SEVERITY_TO_RANK
+
 
 def plot_results(
     driving_df: pd.DataFrame,
@@ -10,28 +12,34 @@ def plot_results(
     # window_seconds: float = 1.0,
     # feature_cols: list[str] | None = None,
 ) -> None:
-    """Visualize anomaly scores, flags, and key pack signals.
+    """Visualize anomaly scores, severity, and key pack signals.
 
     Produces a multi-row Plotly figure with anomaly scores (and threshold), predicted flags,
     and selected pack signals. If model-only anomalies exist (flagged but no BMS fault),
     the first one is expanded via `plot_new_anomaly_windows`.
 
     Args:
-        driving_df: Dataframe containing time-series data with anomaly_score, anomalous_flag, any_bms_fault.
+        driving_df: Dataframe containing time-series data with anomaly_score, anomaly labels, and any_bms_fault.
         threshold: Anomaly score cutoff used for flagging.
         window_seconds: Time span window to show around the first model-only anomaly.
         feature_cols: Optional explicit list of numeric feature columns for window plots; defaults to all numeric.
     """
     t = driving_df["Time"]
-    model_only = driving_df[
-        (driving_df["anomalous_flag"] == 1) & (driving_df["any_bms_fault"] == 0)
-    ]
+    has_severity = "severity_rank" in driving_df.columns
+    if has_severity:
+        model_only = driving_df[
+            (driving_df["severity_rank"] > 0) & (driving_df["any_bms_fault"] == 0)
+        ]
+    else:
+        model_only = driving_df[
+            (driving_df["anomalous_flag"] == 1) & (driving_df["any_bms_fault"] == 0)
+        ]
 
     fig = make_subplots(
         rows=3,
         cols=1,
         shared_xaxes=True,
-        subplot_titles=["Anomaly score", "Flags", "Pack signals"],
+        subplot_titles=["Anomaly score", "Severity / flags", "Pack signals"],
     )
 
     fig.add_trace(
@@ -53,16 +61,29 @@ def plot_results(
         annotation_text="Threshold",
     )
 
-    fig.add_trace(
-        go.Scatter(
-            x=t,
-            y=driving_df["anomalous_flag"],
-            name="Anomalous flag",
-            mode="lines",
-        ),
-        row=2,
-        col=1,
-    )
+    if has_severity:
+        fig.add_trace(
+            go.Scatter(
+                x=t,
+                y=driving_df["severity_rank"],
+                name="Severity",
+                mode="lines",
+                line_shape="hv",
+            ),
+            row=2,
+            col=1,
+        )
+    else:
+        fig.add_trace(
+            go.Scatter(
+                x=t,
+                y=driving_df["anomalous_flag"],
+                name="Anomalous flag",
+                mode="lines",
+            ),
+            row=2,
+            col=1,
+        )
     fig.add_trace(
         go.Scatter(
             x=t,
@@ -98,17 +119,39 @@ def plot_results(
         )
     
     if not model_only.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=model_only["Time"].astype(float),
-                y=model_only["anomaly_score"],
-                mode="markers",
-                marker=dict(color="orange", size=6, symbol="diamond"),
-                name="Model-only anomaly",
-            ),
-            row=1,
-            col=1,
-        )
+        if has_severity:
+            severity_colors = {
+                "low": "goldenrod",
+                "medium": "darkorange",
+                "high": "crimson",
+            }
+            for severity_label, color in severity_colors.items():
+                level_df = model_only[model_only["severity"] == severity_label]
+                if level_df.empty:
+                    continue
+                fig.add_trace(
+                    go.Scatter(
+                        x=level_df["Time"].astype(float),
+                        y=level_df["anomaly_score"],
+                        mode="markers",
+                        marker=dict(color=color, size=6, symbol="diamond"),
+                        name=f"Model-only {severity_label}",
+                    ),
+                    row=1,
+                    col=1,
+                )
+        else:
+            fig.add_trace(
+                go.Scatter(
+                    x=model_only["Time"].astype(float),
+                    y=model_only["anomaly_score"],
+                    mode="markers",
+                    marker=dict(color="orange", size=6, symbol="diamond"),
+                    name="Model-only anomaly",
+                ),
+                row=1,
+                col=1,
+            )
 
     fig.update_layout(
         height=900,
@@ -117,7 +160,17 @@ def plot_results(
         margin=dict(l=60, r=20, t=60, b=40),
     )
     fig.update_yaxes(title_text="Score", row=1, col=1)
-    fig.update_yaxes(title_text="Flags", row=2, col=1)
+    if has_severity:
+        fig.update_yaxes(
+            title_text="Severity",
+            tickmode="array",
+            tickvals=list(range(len(SEVERITY_ORDER))),
+            ticktext=[label.title() for label in SEVERITY_ORDER],
+            row=2,
+            col=1,
+        )
+    else:
+        fig.update_yaxes(title_text="Flags", row=2, col=1)
     fig.update_yaxes(title_text="Pack signals", row=3, col=1)
     fig.update_xaxes(title_text="Time", row=3, col=1)
 
@@ -293,20 +346,32 @@ def _fault_start_indices(labels: np.ndarray) -> list[int]:
 
 
 def early_detection_stats(
-    driving_df: pd.DataFrame, lookback_seconds: float = 1.0
+    driving_df: pd.DataFrame,
+    lookback_seconds: float = 1.0,
+    minimum_severity: str = "low",
 ) -> tuple[int, int, float]:
     """Count faults detected before their flag and compute average lead time (seconds).
 
     Args:
-        driving_df: DataFrame containing Time, any_bms_fault, and anomalous_flag columns.
+        driving_df: DataFrame containing Time, any_bms_fault, and anomaly label columns.
         lookback_seconds: Time window before each fault start to credit early detections.
+        minimum_severity: Lowest severity that counts as an early detection.
 
     Returns:
         A tuple of (num_fault_segments, num_detected_early, mean_lead_time_seconds).
     """
     times = driving_df["Time"].astype(float).values
     y_true = driving_df["any_bms_fault"].values
-    y_pred = driving_df["anomalous_flag"].values
+    if minimum_severity not in SEVERITY_TO_RANK:
+        raise ValueError(f"Unknown severity level: {minimum_severity}")
+
+    if "severity_rank" in driving_df.columns:
+        y_pred = (
+            driving_df["severity_rank"].astype(int).values
+            >= SEVERITY_TO_RANK[minimum_severity]
+        ).astype(int)
+    else:
+        y_pred = driving_df["anomalous_flag"].values
 
     starts = _fault_start_indices(y_true)
     if not starts:
@@ -329,6 +394,13 @@ def early_detection_stats(
     return len(starts), detected_before, mean_lead
 
 
+def _severity_series(driving_df: pd.DataFrame) -> pd.Series:
+    """Return severity labels, falling back to binary anomaly flags if needed."""
+    if "severity" in driving_df.columns:
+        return driving_df["severity"].astype(str)
+    fallback = np.where(driving_df["anomalous_flag"].values == 1, "low", "normal")
+    return pd.Series(fallback, index=driving_df.index, dtype="object")
+
 def print_evaluation(driving_df: pd.DataFrame, lookback_seconds: float = 1.0) -> None:
     """Print high-level evaluation metrics for anomaly flags vs. BMS faults.
 
@@ -346,6 +418,7 @@ def print_evaluation(driving_df: pd.DataFrame, lookback_seconds: float = 1.0) ->
     y_true = driving_df["any_bms_fault"].values
     # and predictions from the model
     y_pred = driving_df["anomalous_flag"].values
+    severity_values = _severity_series(driving_df)
 
     # Basic counts for faulty and normal operational data
     total_fault = int((y_true == 1).sum())
@@ -374,7 +447,7 @@ def print_evaluation(driving_df: pd.DataFrame, lookback_seconds: float = 1.0) ->
             normal_flagged / total_normal if total_normal > 0 else 0
         )
     )
-
+    
     # Quick confusion matrix for a full view of classification behavior
     print("\nConfusion matrix (rows=true, cols=pred):")
     print(f"           Pred 0    Pred 1")
@@ -386,7 +459,9 @@ def print_evaluation(driving_df: pd.DataFrame, lookback_seconds: float = 1.0) ->
 
     # Early detection: count how often we flag before the fault flag starts, and by how much
     total_segments, early_hits, mean_lead = early_detection_stats(
-        driving_df, lookback_seconds=lookback_seconds
+        driving_df,
+        lookback_seconds=lookback_seconds,
+        minimum_severity="low",
     )
     if total_segments:
         print(
