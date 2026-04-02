@@ -8,10 +8,31 @@ from src.models.isolation_forest.isolation_forest import run_isolation_forest as
 from src.models.isolation_forest.isolation_forest_timeseries import (
     run_isolation_forest as run_iforest_timeseries,
 )
-from src.repl.dataset_ops import build_auto_split, format_repo_relative, refresh_dataset_summaries
+from src.repl.dataset_ops import format_repo_relative
 from src.repl.prompts import prompt_optional_index
 from src.repl.types import AppConfig, SessionState, TrainingRun
 from src.utils import early_detection_stats, load_driving_data, plot_results, print_evaluation
+from src.utils.severity import apply_severity_levels
+
+def _format_score_percentiles(scores: np.ndarray) -> str:
+    """Format compact score percentile diagnostics."""
+    pcts = np.quantile(scores, [0.0, 0.25, 0.5, 0.75, 0.9, 0.99, 1.0])
+    labels = ("min", "p25", "p50", "p75", "p90", "p99", "max")
+    return ", ".join(f"{label}={value:.6g}" for label, value in zip(labels, pcts))
+
+
+def _top_feature_error_contributors(
+    inputs: np.ndarray,
+    reconstructed: np.ndarray,
+    feature_cols: list[str],
+    top_k: int = 5,
+) -> str:
+    """Return the top mean per-feature reconstruction errors as a compact string."""
+    feature_errors = np.mean((reconstructed - inputs) ** 2, axis=0)
+    top_indices = np.argsort(feature_errors)[::-1][: min(top_k, len(feature_cols))]
+    return ", ".join(
+        f"{feature_cols[idx]}={feature_errors[idx]:.6g}" for idx in top_indices
+    )
 
 
 def choose_model_name(config: AppConfig) -> str | None:
@@ -56,9 +77,15 @@ def save_training_artifact(
     if window_size is not None:
         payload["window_size"] = window_size
 
-    config.artifact_path.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(payload, config.artifact_path)
-    print(f"Artifact updated: {config.artifact_path}")
+    artifact_path = config.artifact_path
+    if model_name == "autoencoder":
+        artifact_path = (config.repo_root / "artifacts" / "autoencoder.pkl").resolve()
+    elif model_name == "autoencoder-lstm":
+        artifact_path = (config.repo_root / "artifacts" / "autoencoder_lstm.pkl").resolve()
+
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(payload, artifact_path)
+    print(f"Artifact updated: {artifact_path}")
 
 
 def concatenate_driving_data(csv_paths: list[Path]) -> pd.DataFrame:
@@ -90,8 +117,7 @@ def score_isolation_forest(
     result_df = driving_df.copy()
     result_df["anomaly_score"] = anomaly_scores
     result_df["any_bms_fault"] = (driving_df["BMS Disch Enable"] == 0).astype(int).values
-    result_df["anomalous_flag"] = (result_df["anomaly_score"] >= threshold).astype(int)
-    return result_df
+    return apply_severity_levels(result_df, threshold=threshold)
 
 
 def score_isolation_forest_timeseries(
@@ -110,8 +136,86 @@ def score_isolation_forest_timeseries(
     scores = -model.decision_function(scaler.transform(X_windows))
     result_df["anomaly_score"] = scores
     result_df["any_bms_fault"] = fault_flags
-    result_df["anomalous_flag"] = (result_df["anomaly_score"] >= threshold).astype(int)
-    return result_df
+    return apply_severity_levels(result_df, threshold=threshold)
+
+
+def score_autoencoder(
+    driving_df: pd.DataFrame,
+    *,
+    threshold: float,
+    scaler: object,
+    model: object,
+    feature_cols: list[str],
+) -> pd.DataFrame:
+    """Score a dataframe with an already-trained dense autoencoder."""
+    import torch
+
+    required_cols = ["Time", "BMS Disch Enable"]
+    for col in required_cols:
+        if col not in driving_df.columns:
+            raise KeyError(f"Expected column '{col}' not found in driving data.")
+
+    X = driving_df[feature_cols].values.astype(np.float32)
+    X_scaled = scaler.transform(X).astype(np.float32)
+
+    model.eval()
+    with torch.no_grad():
+        X_tensor = torch.from_numpy(X_scaled)
+        reconstructed = model(X_tensor)
+        anomaly_scores = torch.mean((reconstructed - X_tensor) ** 2, dim=1).numpy()
+        reconstructed_np = reconstructed.numpy()
+
+    flagged_ratio = float((anomaly_scores >= threshold).mean()) if len(anomaly_scores) else 0.0
+    print("\n[autoencoder] Evaluation diagnostics")
+    print(f"Threshold: {threshold:.6g}")
+    print(f"Eval score percentiles: {_format_score_percentiles(anomaly_scores)}")
+    print(f"Eval rows above threshold: {flagged_ratio:.2%}")
+    print(
+        "Top eval feature reconstruction errors: "
+        f"{_top_feature_error_contributors(X_scaled, reconstructed_np, feature_cols)}"
+    )
+
+    result_df = driving_df.copy()
+    result_df["anomaly_score"] = anomaly_scores
+    result_df["any_bms_fault"] = (driving_df["BMS Disch Enable"] == 0).astype(int).values
+    return apply_severity_levels(result_df, threshold=threshold)
+
+
+def score_autoencoder_lstm(
+    driving_df: pd.DataFrame,
+    *,
+    threshold: float,
+    scaler: object,
+    model: object,
+    feature_cols: list[str],
+    window_size: int,
+) -> pd.DataFrame:
+    """Score a dataframe with an already-trained LSTM autoencoder."""
+    import torch
+
+    if len(driving_df) < window_size:
+        raise ValueError(
+            f"Not enough samples ({len(driving_df)}) for window size {window_size}."
+        )
+
+    X = driving_df[feature_cols].values.astype(np.float32)
+    sequences = np.array(
+        [X[i : i + window_size] for i in range(len(X) - window_size + 1)],
+        dtype=np.float32,
+    )
+    X_scaled = scaler.transform(sequences.reshape(-1, len(feature_cols))).reshape(sequences.shape)
+    fault_flags = (driving_df["BMS Disch Enable"] == 0).astype(int).values[window_size - 1 :]
+
+    model.eval()
+    with torch.no_grad():
+        X_tensor = torch.from_numpy(X_scaled.astype(np.float32))
+        reconstructed = model(X_tensor)
+        anomaly_scores = torch.mean((reconstructed - X_tensor) ** 2, dim=(1, 2)).numpy()
+
+    result_df = driving_df.iloc[window_size - 1 :].copy()
+    result_df["anomaly_score"] = anomaly_scores
+    result_df["any_bms_fault"] = fault_flags
+    return apply_severity_levels(result_df, threshold=threshold)
 
 
 def _build_timeseries_windows(
@@ -137,83 +241,6 @@ def _build_timeseries_windows(
     return rolling_means.values, fault_flags, result_df
 
 
-def run_auto_split_timeseries(
-    *,
-    train_paths: list[Path],
-    test_paths: list[Path],
-    threshold_quantile: float,
-    contamination: float,
-    window_size: int,
-    random_state: int = 42,
-) -> tuple[pd.DataFrame, float, object, object, list[str]]:
-    """Train timeseries IF on train paths and evaluate on test paths."""
-    train_frames = [load_driving_data(path) for path in train_paths]
-    test_frames = [load_driving_data(path) for path in test_paths]
-
-    if not train_frames or not test_frames:
-        raise ValueError("Train/test frames could not be loaded.")
-
-    feature_cols = [
-        col
-        for col in train_frames[0].select_dtypes(include=["number"]).columns
-        if col not in ("Time", "BMS Disch Enable")
-    ]
-    if not feature_cols:
-        raise ValueError("No numeric feature columns found for sliding window.")
-
-    X_train_full_list: list[np.ndarray] = []
-    X_train_normal_list: list[np.ndarray] = []
-
-    for frame in train_frames:
-        X_full, fault_flags, _ = _build_timeseries_windows(frame, feature_cols, window_size)
-        normal_mask = fault_flags == 0
-        if not normal_mask.any():
-            continue
-        X_train_full_list.append(X_full)
-        X_train_normal_list.append(X_full[normal_mask])
-
-    if not X_train_normal_list:
-        raise ValueError("No normal training windows found in auto split train set.")
-
-    X_train_full = np.vstack(X_train_full_list)
-    X_train_normal = np.vstack(X_train_normal_list)
-
-    from sklearn.ensemble import IsolationForest
-    from sklearn.preprocessing import MinMaxScaler
-
-    scaler = MinMaxScaler()
-    X_train_normal_scaled = scaler.fit_transform(X_train_normal)
-    X_train_full_scaled = scaler.transform(X_train_full)
-
-    iso = IsolationForest(
-        n_estimators=200,
-        max_samples="auto",
-        contamination=contamination,
-        random_state=random_state,
-        n_jobs=-1,
-    )
-    iso.fit(X_train_normal_scaled)
-
-    train_scores = -iso.decision_function(X_train_full_scaled)
-    threshold = float(np.quantile(train_scores, threshold_quantile))
-
-    test_results: list[pd.DataFrame] = []
-    for frame in test_frames:
-        X_test, fault_flags_test, test_df = _build_timeseries_windows(
-            frame, feature_cols, window_size
-        )
-        scores = -iso.decision_function(scaler.transform(X_test))
-        test_df["anomaly_score"] = scores
-        test_df["any_bms_fault"] = fault_flags_test
-        test_df["anomalous_flag"] = (test_df["anomaly_score"] >= threshold).astype(int)
-        test_results.append(test_df)
-
-    if not test_results:
-        raise ValueError("No test windows available after applying window size.")
-
-    return pd.concat(test_results, ignore_index=True), threshold, scaler, iso, feature_cols
-
-
 def train_on_selected_dataset(config: AppConfig, state: SessionState) -> None:
     """Train user-selected model on the selected dataset and store session run."""
     if state.selected_training_dataset is None:
@@ -235,7 +262,7 @@ def train_on_selected_dataset(config: AppConfig, state: SessionState) -> None:
             threshold_quantile=config.default_threshold_quantile,
         )
         window_size: int | None = None
-    else:
+    elif model_name == "isolation-forest-timeseries":
         _, threshold, scaler, model, feature_cols = run_iforest_timeseries(
             driving_df=driving_df,
             contamination=config.default_contamination,
@@ -243,6 +270,25 @@ def train_on_selected_dataset(config: AppConfig, state: SessionState) -> None:
             window_size=config.default_window_size,
         )
         window_size = config.default_window_size
+    elif model_name == "autoencoder":
+        from src.models.autoencoder.autoencoder import run_autoencoder
+
+        _, threshold, scaler, model, feature_cols = run_autoencoder(
+            driving_df=driving_df,
+            threshold_quantile=config.default_threshold_quantile,
+        )
+        window_size = None
+    elif model_name == "autoencoder-lstm":
+        from src.models.autoencoder.autoencoder_lstm import run_autoencoder as run_autoencoder_lstm
+
+        _, threshold, scaler, model, feature_cols = run_autoencoder_lstm(
+            driving_df=driving_df,
+            threshold_quantile=config.default_threshold_quantile,
+            window_size=config.default_window_size,
+        )
+        window_size = config.default_window_size
+    else:
+        raise ValueError(f"Unsupported model: {model_name}")
 
     save_training_artifact(
         config,
@@ -276,93 +322,6 @@ def train_on_selected_dataset(config: AppConfig, state: SessionState) -> None:
     print(f"Training complete. Session run #{state.trained_runs[-1].run_id} stored.")
 
 
-def run_auto_split_training(config: AppConfig, state: SessionState) -> None:
-    """Train on NO_FAULTS datasets and evaluate on HAS_FAULTS datasets."""
-    refresh_dataset_summaries(config, state)
-    usable = [s for s in state.dataset_summaries if s.driving_rows > 0]
-
-    no_fault_count = sum(1 for s in usable if s.label == "no_faults")
-    has_fault_count = sum(1 for s in usable if s.label == "has_faults")
-    if no_fault_count == 0 or has_fault_count == 0:
-        print(
-            "Auto split requires at least one NO_FAULTS dataset and one HAS_FAULTS dataset."
-        )
-        return
-
-    train_paths, test_paths = build_auto_split(state.dataset_summaries)
-    print("\nAuto split plan:")
-    print(f"Train files (NO_FAULTS): {len(train_paths)}")
-    print(f"Test files (HAS_FAULTS): {len(test_paths)}")
-
-    model_name = choose_model_name(config)
-    if model_name is None:
-        return
-
-    if model_name == "isolation-forest":
-        train_df = concatenate_driving_data(train_paths)
-        test_df = concatenate_driving_data(test_paths)
-        _, threshold, scaler, model, feature_cols = run_iforest(
-            driving_df=train_df,
-            contamination=config.default_contamination,
-            threshold_quantile=config.default_threshold_quantile,
-        )
-        result_df = score_isolation_forest(
-            test_df,
-            threshold=threshold,
-            scaler=scaler,
-            model=model,
-            feature_cols=feature_cols,
-        )
-        window_size: int | None = None
-    else:
-        result_df, threshold, scaler, model, feature_cols = run_auto_split_timeseries(
-            train_paths=train_paths,
-            test_paths=test_paths,
-            threshold_quantile=config.default_threshold_quantile,
-            contamination=config.default_contamination,
-            window_size=config.default_window_size,
-        )
-        window_size = config.default_window_size
-
-    split_label = (
-        f"auto_split(train={len(train_paths)} NO_FAULTS, "
-        f"test={len(test_paths)} HAS_FAULTS)"
-    )
-
-    save_training_artifact(
-        config,
-        model_name=model_name,
-        dataset_reference=split_label,
-        threshold=threshold,
-        scaler=scaler,
-        model=model,
-        feature_cols=feature_cols,
-        contamination=config.default_contamination,
-        threshold_quantile=config.default_threshold_quantile,
-        window_size=window_size,
-    )
-
-    state.trained_runs.append(
-        TrainingRun(
-            run_id=len(state.trained_runs) + 1,
-            model_name=model_name,
-            training_dataset_label=split_label,
-            evaluation_dataset_label=split_label,
-            threshold=threshold,
-            contamination=config.default_contamination,
-            threshold_quantile=config.default_threshold_quantile,
-            window_size=window_size,
-            scaler=scaler,
-            model=model,
-            feature_cols=feature_cols,
-            result_df=result_df,
-        )
-    )
-
-    print(f"Auto split training complete. Session run #{state.trained_runs[-1].run_id} stored.")
-    print_evaluation(result_df, lookback_seconds=config.default_lookback_seconds)
-
-
 def evaluate_last_trained_model(config: AppConfig, state: SessionState) -> None:
     """Print evaluation for the most recent trained model in this session."""
     if not state.trained_runs:
@@ -385,7 +344,7 @@ def evaluate_last_trained_model(config: AppConfig, state: SessionState) -> None:
             model=last_run.model,
             feature_cols=last_run.feature_cols,
         )
-    else:
+    elif last_run.model_name == "isolation-forest-timeseries":
         if last_run.window_size is None:
             raise ValueError("Timeseries run is missing window_size.")
         result_df = score_isolation_forest_timeseries(
@@ -396,6 +355,27 @@ def evaluate_last_trained_model(config: AppConfig, state: SessionState) -> None:
             feature_cols=last_run.feature_cols,
             window_size=last_run.window_size,
         )
+    elif last_run.model_name == "autoencoder":
+        result_df = score_autoencoder(
+            eval_df,
+            threshold=last_run.threshold,
+            scaler=last_run.scaler,
+            model=last_run.model,
+            feature_cols=last_run.feature_cols,
+        )
+    elif last_run.model_name == "autoencoder-lstm":
+        if last_run.window_size is None:
+            raise ValueError("LSTM autoencoder run is missing window_size.")
+        result_df = score_autoencoder_lstm(
+            eval_df,
+            threshold=last_run.threshold,
+            scaler=last_run.scaler,
+            model=last_run.model,
+            feature_cols=last_run.feature_cols,
+            window_size=last_run.window_size,
+        )
+    else:
+        raise ValueError(f"Unsupported model: {last_run.model_name}")
 
     last_run.result_df = result_df
     last_run.evaluation_dataset_label = eval_label
