@@ -1,5 +1,5 @@
 from pathlib import Path
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import pandas as pd
 
 MOVING_RPM_THRESHOLD = 0.5
@@ -10,10 +10,10 @@ DATA_COLUMNS = [
     # Battery
     "Pack Voltage",
     "Pack Current",
-    "Pack Temp",
+    # "Pack Temp", High MSE
     "State of Charge",
     "Min Cell Voltage",
-    "BMS LV input",
+    # "BMS LV input", High MSE
     # Powertrain / inverter / motor
     "Torque Feedback",
     "RPM",
@@ -22,7 +22,6 @@ DATA_COLUMNS = [
     "InlineAcc",
     "LateralAcc",
     "VerticalAcc",
-    "BrakeBias",
     "RollRate",
     "PitchRate",
     "YawRate",
@@ -82,30 +81,6 @@ def summarize_dataset(
         fault_rows=fault_rows,
         normal_rows=normal_rows,
     )
-
-
-def summarize_datasets(
-    csv_paths: list[Path], moving_rpm_threshold: float = MOVING_RPM_THRESHOLD
-) -> list[DatasetSummary]:
-    """Summarize many datasets for organization/reporting."""
-    return [
-        summarize_dataset(csv_path=path, moving_rpm_threshold=moving_rpm_threshold)
-        for path in csv_paths
-    ]
-
-
-def save_dataset_manifest(summaries: list[DatasetSummary], output_path: Path) -> None:
-    """Persist dataset summaries to CSV for split planning."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    records = []
-    for summary in summaries:
-        record = asdict(summary)
-        record["csv_path"] = str(summary.csv_path)
-        record["label"] = summary.label
-        records.append(record)
-    pd.DataFrame(records).to_csv(output_path, index=False)
-
-
 def load_driving_data(csv_path: Path) -> pd.DataFrame:
     """Load and clean a driving CSV to a filtered DataFrame.
 

@@ -3,7 +3,7 @@ from typing import Literal
 
 from src.repl.prompts import prompt_optional_index
 from src.repl.types import AppConfig, SessionState
-from src.utils import DatasetSummary, save_dataset_manifest, summarize_dataset
+from src.utils import DatasetSummary, summarize_dataset
 
 
 def list_available_datasets(config: AppConfig) -> list[Path]:
@@ -31,7 +31,7 @@ def dataset_label_display(summary: DatasetSummary) -> str:
 
 
 def dataset_sort_key(config: AppConfig, summary: DatasetSummary) -> tuple[int, str]:
-    """Sort faults-first for split planning, then path."""
+    """Sort faults-first, then path."""
     rank_map = {
         "has_faults": 0,
         "no_faults": 1,
@@ -53,7 +53,6 @@ def refresh_dataset_summaries(config: AppConfig, state: SessionState) -> None:
 
     summaries.sort(key=lambda summary: dataset_sort_key(config, summary))
     state.dataset_summaries = summaries
-    save_dataset_manifest(summaries, config.dataset_manifest_path)
 
     if errored:
         print(f"Skipped {len(errored)} dataset(s) that could not be summarized:")
@@ -133,20 +132,3 @@ def choose_dataset(
         f"({dataset_label_display(selected_summary)}, "
         f"moving={selected_summary.driving_rows}, faults={selected_summary.fault_rows})"
     )
-
-
-def build_auto_split(summaries: list[DatasetSummary]) -> tuple[list[Path], list[Path]]:
-    """Build train/test paths from dataset labels."""
-    usable = [s for s in summaries if s.driving_rows > 0]
-    train_summaries = [s for s in usable if s.label == "no_faults"]
-    test_summaries = [s for s in usable if s.label == "has_faults"]
-
-    train_paths = [s.csv_path for s in train_summaries]
-    test_paths = [s.csv_path for s in test_summaries]
-
-    if not train_paths:
-        raise ValueError("Auto split produced empty train set.")
-    if not test_paths:
-        raise ValueError("Auto split produced empty test set.")
-
-    return train_paths, test_paths

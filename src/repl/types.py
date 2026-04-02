@@ -11,7 +11,6 @@ class AppConfig:
     repo_root: Path
     dataset_root: Path
     artifact_path: Path
-    dataset_manifest_path: Path
     default_contamination: float
     default_threshold_quantile: float
     default_window_size: int
