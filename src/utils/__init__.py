@@ -3,9 +3,7 @@ from . import visualization as _visualization
 from .data import (
     DatasetSummary,
     load_driving_data,
-    save_dataset_manifest,
     summarize_dataset,
-    summarize_datasets,
 )
 
 plot_results = _visualization.plot_results
@@ -23,6 +21,4 @@ __all__ = [
     "DatasetSummary",
     "load_driving_data",
     "summarize_dataset",
-    "summarize_datasets",
-    "save_dataset_manifest",
 ]
