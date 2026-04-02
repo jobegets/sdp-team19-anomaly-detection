@@ -10,7 +10,6 @@ from src.repl.training_ops import (
     compare_session_runs,
     evaluate_last_trained_model,
     plot_last_results,
-    run_auto_split_training,
     train_on_selected_dataset,
 )
 from src.repl.types import AppConfig, SessionState
@@ -67,8 +66,7 @@ def print_repl_menu(config: AppConfig, state: SessionState) -> None:
     print("4. Evaluate last trained model on chosen evaluation dataset")
     print("5. Compare trained models in this session")
     print("6. Plot results from last evaluated run")
-    print("7. Auto split train/test (NO_FAULTS train, HAS_FAULTS test)")
-    print("8. Exit")
+    print("7. Exit")
 
 
 def run_repl(config: AppConfig) -> int:
@@ -86,14 +84,13 @@ def run_repl(config: AppConfig) -> int:
             "Dataset inventory loaded: "
             f"{total} files ({has_faults} has_faults, {no_faults} no_faults, {empty} empty_after_filter)."
         )
-        print(f"Manifest written to: {config.dataset_manifest_path}")
     else:
         print(f"No datasets found under {config.dataset_root}")
 
     while True:
         print_repl_menu(config, state)
         choice = prompt_menu_choice(
-            "Select option [1-8]: ", {"1", "2", "3", "4", "5", "6", "7", "8"}
+            "Select option [1-7]: ", {"1", "2", "3", "4", "5", "6", "7"}
         )
 
         try:
@@ -109,8 +106,6 @@ def run_repl(config: AppConfig) -> int:
                 compare_session_runs(config, state)
             elif choice == "6":
                 plot_last_results(state)
-            elif choice == "7":
-                run_auto_split_training(config, state)
             else:
                 print("Exiting REPL.")
                 return 0
