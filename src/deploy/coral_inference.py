@@ -50,5 +50,7 @@ def stream_scores(csv_path: Path, artifact_path: Path, sleep_seconds: float = 0.
         if sleep_seconds:
             time.sleep(sleep_seconds)
 
+# TODO Receive input from ECE on coral board
+
 if __name__ == "__main__":
     stream_scores(csv_path=DEFAULT_CSV, artifact_path=DEFAULT_ARTIFACT)
