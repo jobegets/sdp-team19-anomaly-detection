@@ -15,12 +15,12 @@ repo_root = Path(__file__).resolve().parents[2]
 DEFAULT_CSV = repo_root / "test-data" / "2025-07-12" / "2025_07_12-08.csv"
 DEFAULT_ARTIFACT = ARTIFACT_PATHS["isolation-forest"]
 
-# Serial setup
-ser = serial.Serial(port='/dev/tty.usbserial-58DD0009681', baudrate=115200, timeout=1)
-        if ser.in_waiting > 0:  # Check if there is data in the buffer
-            line = ser.readline().decode('utf-8').rstrip()
-            print(line)
-e
+# # Serial setup
+# ser = serial.Serial(port='/dev/tty.usbserial-58DD0009681', baudrate=115200, timeout=1)
+#         if ser.in_waiting > 0:  # Check if there is data in the buffer
+#             line = ser.readline().decode('utf-8').rstrip()
+#             print(line)
+# e
 
 def stream_scores(csv_path: Path, artifact_path: Path, sleep_seconds: float = 0.05) -> None:
     """Simulate streaming sensor data and print anomaly scores using a pre-trained model.
